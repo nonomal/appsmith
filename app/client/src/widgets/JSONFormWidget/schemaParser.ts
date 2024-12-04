@@ -7,33 +7,40 @@ import {
   sortBy,
   startCase,
 } from "lodash";
+
 import { sanitizeKey } from "widgets/WidgetUtils";
+import type {
+  FieldComponentBaseProps,
+  Schema,
+  SchemaItem,
+  FieldThemeStylesheet,
+} from "./constants";
 import {
   ARRAY_ITEM_KEY,
   DATA_TYPE_POTENTIAL_FIELD,
   DataType,
   FIELD_MAP,
   FIELD_TYPE_TO_POTENTIAL_DATA,
-  FieldComponentBaseProps,
   FieldType,
   getBindingTemplate,
   RESTRICTED_KEYS,
   ROOT_SCHEMA_KEY,
-  Schema,
-  SchemaItem,
 } from "./constants";
+import { getFieldStylesheet } from "./helper";
+import { klonaRegularWithTelemetry } from "utils/helpers";
 
-import { klona } from "klona/full";
+type Obj = Record<string, unknown>;
 
-type Obj = Record<string, any>;
-type JSON = Obj | Obj[];
-
-type ParserOptions = {
-  currSourceData?: JSON | string;
+interface ParserOptions {
+  baseSchemaPath: string | null;
+  currSourceData?: unknown;
+  fieldThemeStylesheets?: FieldThemeStylesheet;
   fieldType?: FieldType;
   isCustomField?: boolean;
   prevSchema?: Schema;
   schemaItem?: SchemaItem;
+  modifiedSchemaItems: Record<string, unknown>; // Key value pairs of paths and schemaItem which updated.
+  removedSchemaItems: string[]; // Paths of schemaItems that deleted.
   // - skipDefaultValueProcessing
   // When an array type is detected, by default we want to process default value
   // only for the array field and keep every field below it as empty default.
@@ -41,19 +48,30 @@ type ParserOptions = {
   sourceDataPath?: string;
   widgetName: string;
   identifier: string;
-};
+}
 
-type SchemaItemsByFieldOptions = {
+interface SchemaItemsByFieldOptions {
+  fieldThemeStylesheets?: FieldThemeStylesheet;
+  schema: Schema;
   schemaItem: SchemaItem;
   schemaItemPath: string;
-  schema: Schema;
   widgetName: string;
-};
+}
 
-type GetKeysFromSchemaOptions = {
+interface GetKeysFromSchemaOptions {
   onlyNonCustomFieldKeys?: boolean;
   onlyCustomFieldKeys?: boolean;
-};
+}
+
+interface ParseOptions {
+  currSourceData?: unknown;
+  schema?: Schema;
+  fieldThemeStylesheets?: FieldThemeStylesheet;
+}
+
+function isObject(val: unknown): val is Obj {
+  return typeof val === "object" && !Array.isArray(val) && val !== null;
+}
 
 /**
  *
@@ -92,6 +110,7 @@ export const getSourcePath = (name: string | number, basePath?: string) => {
 
   if (typeof name === "string") {
     const sanitizedName = sanitizeKey(name);
+
     nameWithNotation = `.${name}`;
 
     if (sanitizedName !== name) {
@@ -120,7 +139,11 @@ export const getSourceDataPathFromSchemaItemPath = (
   schemaItemPath: string,
 ) => {
   const keys = schemaItemPath.split("."); //schema.__root_schema__.children.name -> ["schema", ROOT_SCHEMA_KEY, "children", "name"]
-  let clonedSchema = klona(schema);
+  let clonedSchema = klonaRegularWithTelemetry(
+    schema,
+    "schemaParser.getSourceDataPathFromSchemaItemPath",
+  );
+
   let sourceDataPath = "sourceData";
   let schemaItem: SchemaItem;
   let skipIteration = false;
@@ -160,15 +183,20 @@ export const getSourceDataPathFromSchemaItemPath = (
   return sourceDataPath;
 };
 
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const dataTypeFor = (value: any) => {
   const typeOfValue = typeof value;
 
   if (Array.isArray(value)) return DataType.ARRAY;
+
   if (value === null) return DataType.NULL;
 
   return typeOfValue as DataType;
 };
 
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const subDataTypeFor = (value: any) => {
   const dataType = dataTypeFor(value);
 
@@ -188,6 +216,8 @@ export const subDataTypeFor = (value: any) => {
  *  normalizeArrayValue([""]) -> ""
  *  normalizeArrayValue([{ foo: 10 }, { bar: "hello"}]) -> { foo: 10, bar: "hello" }
  */
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const normalizeArrayValue = (data: any[]) => {
   if (subDataTypeFor(data) === DataType.OBJECT) {
     return constructPlausibleObjectFromArray(data);
@@ -196,7 +226,7 @@ export const normalizeArrayValue = (data: any[]) => {
   return data[0];
 };
 
-export const fieldTypeFor = (value: any) => {
+export const fieldTypeFor = (value: unknown): FieldType => {
   const dataType = dataTypeFor(value);
   const potentialFieldType = DATA_TYPE_POTENTIAL_FIELD[dataType];
   const subDataType = subDataTypeFor(value);
@@ -265,6 +295,7 @@ export const getKeysFromSchema = (
 
 export const mapOriginalIdentifierToSanitizedIdentifier = (schema: Schema) => {
   const map: Record<string, string> = {};
+
   Object.values(schema).map(({ identifier, originalIdentifier }) => {
     map[originalIdentifier] = identifier;
   });
@@ -309,7 +340,11 @@ export const applyPositions = (schema: Schema, newKeys?: string[]) => {
  *  checkIfArrayAndSubDataTypeChanged(["test"], "test") -> false
  */
 export const checkIfArrayAndSubDataTypeChanged = (
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   currentData: any,
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   prevData: any,
 ) => {
   if (!Array.isArray(currentData) || !Array.isArray(prevData)) return false;
@@ -320,6 +355,8 @@ export const checkIfArrayAndSubDataTypeChanged = (
   return currSubDataType !== prevSubDataType;
 };
 
+// TODO: Fix this the next time the file is edited
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const hasNullOrUndefined = (items: any[]) =>
   items.includes(null) || items.includes(undefined);
 
@@ -348,34 +385,47 @@ class SchemaParser {
    * @param currSourceData The source data for parsing
    * @param schema Previous generated schema if present.
    */
-  static parse = (
-    widgetName: string,
-    currSourceData?: JSON,
-    schema: Schema = {},
-  ) => {
-    if (!currSourceData) return schema;
+  static parse = (widgetName: string, options: ParseOptions) => {
+    const { currSourceData, fieldThemeStylesheets, schema = {} } = options;
+
+    if (!currSourceData)
+      return { schema, modifiedSchemaItems: {}, removedSchemaItems: [] };
+
+    const modifiedSchemaItems = {};
+    const removedSchemaItems: string[] = [];
 
     const prevSchema = (() => {
       const rootSchemaItem = schema[ROOT_SCHEMA_KEY];
+
       if (rootSchemaItem) return rootSchemaItem.children;
 
       return {};
     })();
 
     const rootSchemaItem = SchemaParser.getSchemaItemFor("", {
+      baseSchemaPath: `schema.${ROOT_SCHEMA_KEY}`,
       currSourceData,
+      removedSchemaItems,
+      fieldThemeStylesheets,
+      identifier: ROOT_SCHEMA_KEY,
+      modifiedSchemaItems,
       prevSchema,
+      skipDefaultValueProcessing: false,
       sourceDataPath: "sourceData",
       widgetName,
-      skipDefaultValueProcessing: false,
-      identifier: ROOT_SCHEMA_KEY,
     });
 
     rootSchemaItem.originalIdentifier = ROOT_SCHEMA_KEY;
     rootSchemaItem.accessor = ROOT_SCHEMA_KEY;
 
-    return {
+    const parsedSchema: Schema = {
       [ROOT_SCHEMA_KEY]: rootSchemaItem,
+    };
+
+    return {
+      schema: parsedSchema,
+      modifiedSchemaItems,
+      removedSchemaItems,
     };
   };
 
@@ -390,7 +440,13 @@ class SchemaParser {
     fieldType: FieldType,
     options: SchemaItemsByFieldOptions,
   ) => {
-    const { schema, schemaItem, schemaItemPath, widgetName } = options;
+    const {
+      fieldThemeStylesheets,
+      schema,
+      schemaItem,
+      schemaItemPath,
+      widgetName,
+    } = options;
 
     const sourceDataPath = getSourceDataPathFromSchemaItemPath(
       schema,
@@ -399,6 +455,7 @@ class SchemaParser {
 
     const currSourceData = (() => {
       const potentialData = FIELD_TYPE_TO_POTENTIAL_DATA[fieldType];
+
       if (schemaItem.isCustomField) {
         return potentialData;
       }
@@ -418,13 +475,17 @@ class SchemaParser {
     })();
 
     const newSchemaItem = SchemaParser.getSchemaItemFor(schemaItem.identifier, {
-      isCustomField: schemaItem.isCustomField,
       currSourceData,
+      fieldThemeStylesheets,
       fieldType,
-      widgetName,
-      sourceDataPath,
-      skipDefaultValueProcessing: false,
       identifier: schemaItem.identifier,
+      isCustomField: schemaItem.isCustomField,
+      skipDefaultValueProcessing: false,
+      baseSchemaPath: schemaItemPath,
+      sourceDataPath,
+      widgetName,
+      modifiedSchemaItems: {},
+      removedSchemaItems: [],
     });
 
     // We try to salvage some of the properties that we do not want to get modified by the
@@ -460,7 +521,9 @@ class SchemaParser {
     options: ParserOptions,
   ): SchemaItem => {
     const {
+      baseSchemaPath,
       currSourceData,
+      fieldThemeStylesheets,
       identifier,
       isCustomField = false,
       skipDefaultValueProcessing,
@@ -472,6 +535,11 @@ class SchemaParser {
     const fieldType = options.fieldType || fieldTypeFor(currSourceData);
     const FieldComponent = FIELD_MAP[fieldType];
     const bindingTemplate = getBindingTemplate(widgetName);
+    const fieldStylesheet = getFieldStylesheet(
+      widgetName,
+      fieldType,
+      fieldThemeStylesheets,
+    );
 
     const defaultValue = (() => {
       if (isCustomField || skipDefaultValueProcessing) return;
@@ -489,7 +557,12 @@ class SchemaParser {
     // as it might bleed into subsequent schema item and force assign fieldType
     const sanitizedOptions = omit(options, ["fieldType"]);
 
+    if (baseSchemaPath) {
+      sanitizedOptions.baseSchemaPath = `${baseSchemaPath}.children`;
+    }
+
     let children: Schema = {};
+
     if (dataType === DataType.OBJECT) {
       children = SchemaParser.convertObjectToSchema(sanitizedOptions);
     }
@@ -503,6 +576,7 @@ class SchemaParser {
     const componentDefaultValues = (() => {
       const { componentDefaultValues } = FieldComponent;
       let defaultValues: FieldComponentBaseProps;
+
       if (typeof componentDefaultValues === "function") {
         defaultValues = componentDefaultValues({
           sourceDataPath,
@@ -544,6 +618,7 @@ class SchemaParser {
       identifier,
       position: -1,
       originalIdentifier: key,
+      ...fieldStylesheet,
       ...componentDefaultValues,
     };
   };
@@ -553,6 +628,7 @@ class SchemaParser {
   // which is further processed and based on it's changes the children is fetched and
   // returned in the schemaItem object
   static getUnModifiedSchemaItemFor = ({
+    baseSchemaPath,
     currSourceData,
     schemaItem = {} as SchemaItem,
     ...rest
@@ -564,6 +640,7 @@ class SchemaParser {
       ...rest,
       currSourceData,
       prevSchema: children,
+      baseSchemaPath: baseSchemaPath ? `${baseSchemaPath}.children` : null,
     };
 
     if (dataType === DataType.OBJECT) {
@@ -583,35 +660,72 @@ class SchemaParser {
 
   // This method deals with the conversion of array data to a schema
   static convertArrayToSchema = ({
-    currSourceData = [],
+    baseSchemaPath,
+    currSourceData,
+    fieldThemeStylesheets,
+    modifiedSchemaItems,
     prevSchema = {},
+    removedSchemaItems,
     sourceDataPath,
     widgetName,
     ...rest
   }: Omit<ParserOptions, "identifier">): Schema => {
-    const schema = klona(prevSchema);
-    const currData = normalizeArrayValue(currSourceData as any[]);
+    const schema = klonaRegularWithTelemetry(
+      prevSchema,
+      "schemaParser.convertArrayToSchema",
+    );
+
+    if (!Array.isArray(currSourceData)) {
+      return schema;
+    }
+
+    const currData = normalizeArrayValue(currSourceData);
 
     const prevDataType = schema[ARRAY_ITEM_KEY]?.dataType;
     const currDataType = dataTypeFor(currData);
 
+    const newBaseSchemaPath = baseSchemaPath
+      ? `${baseSchemaPath}.${ARRAY_ITEM_KEY}`
+      : null;
+
     if (currDataType !== prevDataType) {
+      /**
+       * Why set baseSchemaPath to null.
+       * When getSchemaItemFor is called, it always means that default config is generated for
+       * the particular key and if the key's value is an object or array; it has nested keys to be processed.
+       * For those nested keys, we do not want an entry in the modifiedSchemaItems as the parent key would have
+       * all the config including the nested ones.
+       * So setting it null, prevents the subsequent calls of getSchemaItemFor to avoid adding it to
+       * modifiedSchemaItems or removedSchemaItems
+       */
       schema[ARRAY_ITEM_KEY] = SchemaParser.getSchemaItemFor(ARRAY_ITEM_KEY, {
         ...rest,
-        widgetName,
+        baseSchemaPath: null,
         currSourceData: currData,
-        sourceDataPath: getSourcePath(0, sourceDataPath),
-        skipDefaultValueProcessing: true,
+        fieldThemeStylesheets,
         identifier: ARRAY_ITEM_KEY,
+        modifiedSchemaItems,
+        removedSchemaItems,
+        skipDefaultValueProcessing: true,
+        sourceDataPath: getSourcePath(0, sourceDataPath),
+        widgetName,
       });
+
+      if (newBaseSchemaPath) {
+        modifiedSchemaItems[newBaseSchemaPath] = schema[ARRAY_ITEM_KEY];
+      }
     } else {
       schema[ARRAY_ITEM_KEY] = SchemaParser.getUnModifiedSchemaItemFor({
+        baseSchemaPath: newBaseSchemaPath,
         currSourceData: currData,
+        fieldThemeStylesheets,
+        identifier: ARRAY_ITEM_KEY,
+        modifiedSchemaItems,
+        removedSchemaItems,
         schemaItem: schema[ARRAY_ITEM_KEY],
+        skipDefaultValueProcessing: true,
         sourceDataPath: getSourcePath(0, sourceDataPath),
         widgetName,
-        skipDefaultValueProcessing: true,
-        identifier: ARRAY_ITEM_KEY,
       });
     }
 
@@ -620,17 +734,25 @@ class SchemaParser {
 
   // This method deals with the conversion of object data to a schema
   static convertObjectToSchema = ({
-    currSourceData = {},
+    baseSchemaPath,
+    currSourceData,
+    modifiedSchemaItems,
     prevSchema = {},
+    removedSchemaItems,
     sourceDataPath,
-    widgetName,
     ...rest
   }: Omit<ParserOptions, "identifier">): Schema => {
-    const schema = klona(prevSchema);
-    const origIdentifierToIdentifierMap = mapOriginalIdentifierToSanitizedIdentifier(
-      schema,
+    const schema = klonaRegularWithTelemetry(
+      prevSchema,
+      "schemaParser.convertObjectToSchema",
     );
-    const currObj = currSourceData as Obj;
+
+    const origIdentifierToIdentifierMap =
+      mapOriginalIdentifierToSanitizedIdentifier(schema);
+
+    if (!isObject(currSourceData)) {
+      return schema;
+    }
 
     const customFieldAccessors = getKeysFromSchema(prevSchema, ["accessor"], {
       onlyCustomFieldKeys: true,
@@ -658,11 +780,16 @@ class SchemaParser {
 
     modifiedKeys.forEach((modifiedKey) => {
       const identifier = origIdentifierToIdentifierMap[modifiedKey];
-      const prevSchemaItem = klona(schema[identifier]);
-      const currData = currObj[modifiedKey];
+      const prevSchemaItem = klonaRegularWithTelemetry(
+        schema[identifier],
+        "schemaParser.convertObjectToSchema.modifiedKeys",
+      );
+
+      const currData = currSourceData[modifiedKey];
       const prevData = prevSchemaItem.sourceData;
       const currDataType = dataTypeFor(currData);
       const prevDataType = schema[identifier].dataType;
+      const schemaPath = `${baseSchemaPath}.${identifier}`;
 
       const isArrayAndSubDataTypeChanged = checkIfArrayAndSubDataTypeChanged(
         currData,
@@ -693,40 +820,62 @@ class SchemaParser {
           currSourceData: currData,
           prevSchema: prevSchemaItem.children,
           sourceDataPath: getSourcePath(modifiedKey, sourceDataPath),
-          widgetName,
+          baseSchemaPath: null,
           identifier,
+          modifiedSchemaItems,
+          removedSchemaItems,
         });
 
         schema[identifier].position = prevSchemaItem.position;
+
+        if (baseSchemaPath) {
+          modifiedSchemaItems[schemaPath] = schema[identifier];
+        }
       } else {
         schema[identifier] = SchemaParser.getUnModifiedSchemaItemFor({
           ...rest,
           currSourceData: currData,
           schemaItem: prevSchemaItem,
+          baseSchemaPath: schemaPath,
           sourceDataPath: getSourcePath(modifiedKey, sourceDataPath),
           identifier,
-          widgetName,
+          modifiedSchemaItems,
+          removedSchemaItems,
         });
       }
     });
 
     removedKeys.forEach((removedKey) => {
       const identifier = origIdentifierToIdentifierMap[removedKey];
+
       delete schema[identifier];
+
+      if (baseSchemaPath) {
+        removedSchemaItems.push(`${baseSchemaPath}.${identifier}`);
+      }
     });
 
     const newAddedKeys: string[] = [];
+
     newKeys.forEach((newKey) => {
       const schemaItem = SchemaParser.getSchemaItemFor(newKey, {
         ...rest,
-        currSourceData: currObj[newKey],
+        currSourceData: currSourceData[newKey],
         sourceDataPath: getSourcePath(newKey, sourceDataPath),
+        baseSchemaPath: null,
+        modifiedSchemaItems,
+        removedSchemaItems,
         identifier: sanitizeSchemaItemKey(newKey, schema),
-        widgetName,
       });
 
       schema[schemaItem.identifier] = schemaItem;
       newAddedKeys.push(schemaItem.identifier);
+
+      if (baseSchemaPath) {
+        const schemaPath = `${baseSchemaPath}.${schemaItem.identifier}`;
+
+        modifiedSchemaItems[schemaPath] = schema[schemaItem.identifier];
+      }
     });
 
     applyPositions(schema, newAddedKeys);

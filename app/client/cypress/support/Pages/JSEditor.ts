@@ -1,211 +1,243 @@
 import { ObjectsRegistry } from "../Objects/Registry";
+import {
+  AppSidebar,
+  AppSidebarButton,
+  PageLeftPane,
+  PagePaneSegment,
+} from "./EditorNavigation";
+import { PluginEditorToolbar } from "./IDE/PluginEditorToolbar";
+
+export interface ICreateJSObjectOptions {
+  paste: boolean;
+  completeReplace: boolean;
+  toRun: boolean;
+  shouldCreateNewJSObj: boolean;
+  lineNumber?: number;
+  prettify?: boolean;
+  isPackages?: boolean;
+}
+const DEFAULT_CREATE_JS_OBJECT_OPTIONS = {
+  paste: true,
+  completeReplace: false,
+  toRun: true,
+  shouldCreateNewJSObj: true,
+  lineNumber: 4,
+  prettify: true,
+};
 
 export class JSEditor {
   public agHelper = ObjectsRegistry.AggregateHelper;
   public locator = ObjectsRegistry.CommonLocators;
   public ee = ObjectsRegistry.EntityExplorer;
+  public propPane = ObjectsRegistry.PropertyPane;
+  private assertHelper = ObjectsRegistry.AssertHelper;
+  public runButtonLocator = "[data-testid='t--run-js-action']";
+  public settingsTriggerLocator = "[data-testid='t--js-settings-trigger']";
+  public contextMenuTriggerLocator = "[data-testid='t--more-action-trigger']";
+  public runFunctionSelectLocator = "[data-testid='t--js-function-run']";
 
-  private _runButton = "//li//*[local-name() = 'svg' and @class='run-button']";
-  private _outputConsole = ".CodeEditorTarget";
-  private _jsObjName = ".t--js-action-name-edit-field span";
-  private _jsObjTxt = ".t--js-action-name-edit-field input";
-  private _newJSobj = "span:contains('New JS Object')"
-  private _bindingsClose = ".t--entity-property-close"
-  private _propertyList = ".t--entity-property"
-  private _responseTabAction = (funName: string) => "//div[@class='function-name'][text()='" + funName + "']/following-sibling::div//*[local-name()='svg']"
-  private _functionSetting = (settingTxt: string) => "//span[text()='" + settingTxt + "']/parent::div/following-sibling::input[@type='checkbox']"
-  _dialog = (dialogHeader: string) => "//div[contains(@class, 'bp3-dialog')]//h4[contains(text(), '" + dialogHeader + "')]"
-  private _closeSettings = "span[icon='small-cross']"
+  public toolbar = new PluginEditorToolbar(
+    this.runButtonLocator,
+    this.settingsTriggerLocator,
+    this.contextMenuTriggerLocator,
+    this.runFunctionSelectLocator,
+  );
 
+  _codeTab = "//span[text()='Code']/parent::button";
+  private _jsObjectParseErrorCallout =
+    "div.t--js-response-parse-error-call-out";
 
-  public NavigateToJSEditor() {
-    cy.get(this.locator._createNew)
-      .last()
-      .click({ force: true });
-    cy.get(this._newJSobj).click({ force: true });
+  private _onPageLoadSwitch = (functionName: string) =>
+    `.${functionName}-on-page-load-setting
+    input[role="switch"]`;
+  private _onPageLoadSwitchStatus = (functionName: string) =>
+    `//div[contains(@class, '${functionName}-on-page-load-setting')]//label/input`;
 
-    //cy.waitUntil(() => cy.get(this.locator._toastMsg).should('not.be.visible')) // fails sometimes
-    //this.agHelper.WaitUntilEleDisappear(this.locator._toastMsg, 'created successfully')
+  private _jsObjName = ".editor-tab.active > .ads-v2-text";
+  public _jsObjTxt = ".editor-tab.active > .ads-v2-text input";
+  public _newJSobj = "span:contains('New JS object')";
+  private _bindingsClose = ".t--entity-property-close";
+  public _propertyList = ".binding";
+  _dialog = (dialogHeader: string) =>
+    "//div[@role='dialog']//h3[contains(text(), '" + dialogHeader + "')]";
+  _dialogBody = (jsFuncName: string) =>
+    "//div[@role='dialog']//*[contains(text(), '" +
+    Cypress.env("MESSAGES")?.QUERY_CONFIRMATION_MODAL_MESSAGE() +
+    "')]//*[contains(text(),'" +
+    jsFuncName +
+    "')]";
+  _dialogInDeployView =
+    "//div[@role='dialog']//*[contains(text(), '" +
+    Cypress.env("MESSAGES")?.QUERY_CONFIRMATION_MODAL_MESSAGE() +
+    "')]";
+  _funcDropdownValue = `${this.runFunctionSelectLocator} .ads-v2-button__content-children`;
+  _funcDropdownOptions =
+    "[data-testid='t--js-functions-menu'] [role='menuitem'] > span > span";
+  _getJSFunctionSettingsId = (JSFunctionName: string) =>
+    `${JSFunctionName}-settings`;
+  _asyncJSFunctionSettings = `.t--async-js-function-settings`;
+  _debugCTA = `button.js-editor-debug-cta`;
+  _lineinJsEditor = (lineNumber: number) =>
+    ":nth-child(" + lineNumber + ") > .CodeMirror-line";
+  _lineinPropertyPaneJsEditor = (lineNumber: number, selector = "") =>
+    `${
+      selector ? `${selector} ` : ""
+    }.CodeMirror-line:nth-child(${lineNumber})`;
+  _logsTab = "[data-testid=t--tab-LOGS_TAB]";
+  _confirmationModalBtns = (text: string) =>
+    "//div[@data-testid='t--query-run-confirmation-modal']//span[text()='" +
+    text +
+    "']";
+  //#endregion
+
+  //#region constants
+  private isMac = Cypress.platform === "darwin";
+  private selectAllJSObjectContentShortcut = `${
+    this.isMac ? "{cmd}{a}" : "{ctrl}{a}"
+  }`;
+  //#endregion
+
+  // Pastes or types content into field
+  private HandleJsContentFilling(toPaste: boolean, JSCode: string, el: any) {
+    if (toPaste) {
+      this.agHelper.Paste(el, JSCode);
+    } else {
+      cy.get(el).type(JSCode, {
+        parseSpecialCharSequences: false,
+        delay: 40,
+        force: true,
+      });
+    }
+  }
+
+  //#region Page functions
+  public NavigateToNewJSEditor() {
+    this.agHelper.ClickOutside(); //to enable click of below!
+    AppSidebar.navigate(AppSidebarButton.Editor);
+    PageLeftPane.switchSegment(PagePaneSegment.JS);
+    PageLeftPane.switchToAddNew();
+
+    this.agHelper.RemoveUIElement(
+      "Tooltip",
+      Cypress.env("MESSAGES").ADD_QUERY_JS_TOOLTIP(),
+    );
+    //Checking JS object was created successfully
+    this.assertHelper.AssertNetworkStatus("@createNewJSCollection", 201);
+    this.agHelper.AssertElementAbsence(this._jsObjTxt);
+
     this.agHelper.Sleep();
   }
 
   public CreateJSObject(
     JSCode: string,
-    paste = true,
-    completeReplace = false,
-    toRun = true,
+    options: Partial<ICreateJSObjectOptions> = {},
   ) {
-    this.NavigateToJSEditor();
+    const {
+      completeReplace,
+      isPackages,
+      lineNumber,
+      paste,
+      prettify,
+      shouldCreateNewJSObj,
+      toRun,
+    } = { ...DEFAULT_CREATE_JS_OBJECT_OPTIONS, ...options };
 
+    shouldCreateNewJSObj && this.NavigateToNewJSEditor();
     if (!completeReplace) {
+      const downKeys = "{downarrow}".repeat(lineNumber);
       cy.get(this.locator._codeMirrorTextArea)
         .first()
         .focus()
-        .type("{downarrow}{downarrow}{downarrow}{downarrow}  ");
+        .type(`${downKeys}  `)
+        .then((el: any) => {
+          this.HandleJsContentFilling(paste, JSCode, el);
+        });
     } else {
       cy.get(this.locator._codeMirrorTextArea)
         .first()
         .focus()
-        .type(
-          "{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}",
-        )
-        .type(
-          "{shift}{uparrow}{uparrow}{uparrow}{uparrow}{uparrow}{uparrow}{uparrow}{uparrow}{uparrow}",
-          { force: true },
-        )
-        .type("{backspace}", { force: true });
-
-      // .type("{uparrow}", { force: true })
-      // .type("{ctrl}{shift}{downarrow}", { force: true })
-      // .type("{del}",{ force: true });
-
-      // cy.get(this.locator._codthis.eeditorTarget).contains('export').click().closest(this.locator._codthis.eeditorTarget)
-      //   .type("{uparrow}", { force: true })
-      //   .type("{ctrl}{shift}{downarrow}", { force: true })
-      //   .type("{backspace}",{ force: true });
-      //.type("{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow}{downarrow} ")
-    }
-
-    cy.get(this.locator._codeMirrorTextArea)
-      .first()
-      .then((el: any) => {
-        const input = cy.get(el);
-        if (paste) {
-          //input.invoke("val", value);
-          this.agHelper.Paste(el, JSCode);
-        } else {
-          input.type(JSCode, {
-            parseSpecialCharSequences: false,
-            delay: 150,
-          });
-        }
-      });
-
-    this.agHelper.AssertAutoSave(); //Ample wait due to open bug # 10284
-    //this.agHelper.Sleep(5000)//Ample wait due to open bug # 10284
-
-    if (toRun) {
-      //clicking 1 times & waits for 3 second for result to be populated!
-      Cypress._.times(1, () => {
-        cy.xpath(this._runButton)
-          .first()
-          .click()
-          .wait(3000);
-      });
-      cy.get(this.locator._empty).should("not.exist");
-      cy.get(this.locator._toastMsg).should("have.length", 0);
-    }
-    this.GetJSObjectName();
-  }
-
-  //Not working - To improve!
-  public EditJSObj(existingTxt: string, newTxt: string) {
-    cy.get(this.locator._codeEditorTarget)
-      .contains(existingTxt)
-      .dblclick(); //.type("{backspace}").type(newTxt)
-    cy.get("body")
-      .type("{backspace}")
-      .type(newTxt);
-    this.agHelper.AssertAutoSave(); //Ample wait due to open bug # 10284
-  }
-
-  public EnterJSContext(endp: string, value: string, paste = true, toToggleOnJS = false, notField = false) {
-    if (toToggleOnJS) {
-      cy.get(this.locator._jsToggle(endp.replace(/ +/g, "").toLowerCase()))
-        .invoke("attr", "class")
-        .then((classes: any) => {
-          if (!classes.includes("is-active")) {
-            cy.get(this.locator._jsToggle(endp.replace(/ +/g, "").toLowerCase()))
-              .first()
-              .click({ force: true });
-          }
+        .type(this.selectAllJSObjectContentShortcut)
+        .then((el: any) => {
+          this.HandleJsContentFilling(paste, JSCode, el);
         });
     }
-    // cy.get(this.locator._propertyControl + endp + " " + this.locator._codeMirrorTextArea)
-    //   .first()
-    //   .focus()
-    //   //.type("{selectAll}")
-    //   .type("{uparrow}{uparrow}", { force: true })
-    //   .type("{selectAll}")
-    //   // .type("{ctrl}{shift}{downarrow}", { force: true })
-    //   .type("{del}", { force: true });
 
-    if (paste) {
-      this.agHelper.EnterValue(value, endp, notField)
-    }
-    else {
-      cy.get(this.locator._propertyControl + endp.replace(/ +/g, "").toLowerCase() + " " + this.locator._codeMirrorTextArea)
-        .first()
-        .then((el: any) => {
-          const input = cy.get(el);
-          input.type(value, {
-            parseSpecialCharSequences: false,
-          });
-        })
+    this.agHelper.AssertAutoSave();
+    if (prettify) {
+      this.agHelper.ActionContextMenuWithInPane({ action: "Prettify code" });
+      this.agHelper.AssertAutoSave();
     }
 
-
-    // cy.focused().then(($cm: any) => {
-    //   if ($cm.contents != "") {
-    //     cy.log("The field is not empty");
-    //     cy.get(this.locator._propertyControl + endp + " " + this.locator._codeMirrorTextArea)
-    //       .first()
-    //       .click({ force: true })
-    //       .type("{selectAll}")
-    //       .focused()
-    //       .clear({
-    //         force: true,
-    //       });
-    //   }
-    //   this.agHelper.Sleep()
-    //   cy.get(this.locator._propertyControl + endp + " " + this.locator._codeMirrorTextArea)
-    //     .first()
-    //     .then((el: any) => {
-    //       const input = cy.get(el);
-    //       if (paste) {
-    //         //input.invoke("val", value);
-    //         this.agHelper.Paste(el, value)
-    //       } else {
-    //         this.agHelper.EnterValue(value, "Table Data")
-
-    //         // input.type(value, {
-    //         //   parseSpecialCharSequences: false,
-    //         // });
-    //       }
-    //     });
-    // });
-
-    this.agHelper.AssertAutoSave()//Allowing time for Evaluate value to capture value
-
+    if (toRun) {
+      // Wait for JSObject parsing to get complete
+      this.agHelper.Sleep(2000);
+      //clicking 1 times & waits for 2 second for result to be populated!
+      Cypress._.times(1, () => {
+        this.toolbar.clickRunButton();
+        this.agHelper.Sleep(2000);
+      });
+      cy.get(this.locator._empty).should("not.exist");
+    }
+    if (!isPackages) {
+      this.GetJSObjectName();
+    }
   }
 
-  public RemoveText(endp: string) {
-    cy.get(this.locator._propertyControl + endp + " " + this.locator._codeMirrorTextArea)
+  //Edit the name of a JSObject's property (variable or function)
+  public EditJSObj(
+    newContent: string,
+    toPrettify = true,
+    toVerifyAutoSave = true,
+  ) {
+    cy.get(this.locator._codeMirrorTextArea)
       .first()
       .focus()
-      .type("{uparrow}", { force: true })
-      .type("{ctrl}{shift}{downarrow}", { force: true })
-      .type("{del}", { force: true });
-    this.agHelper.AssertAutoSave()
+      .type(this.selectAllJSObjectContentShortcut, { force: true })
+      .then((el: JQuery<HTMLElement>) => {
+        this.agHelper.Paste(el, newContent);
+      });
+    this.agHelper.Sleep(2000); //Settling time for edited js code
+    toPrettify &&
+      this.agHelper.ActionContextMenuWithInPane({ action: "Prettify code" });
+    toVerifyAutoSave && this.agHelper.AssertAutoSave();
   }
 
-  public RenameJSObjFromForm(renameVal: string) {
-    cy.get(this._jsObjName).click({ force: true });
+  public ClearJSObj() {
+    cy.get(this.locator._codeMirrorTextArea)
+      .first()
+      .focus()
+      .type(this.selectAllJSObjectContentShortcut, { force: true })
+      .type("{backspace}", { force: true });
+    this.agHelper.Sleep(2000); //Settling time for edited js code
+    this.agHelper.AssertAutoSave();
+  }
+
+  public RunJSObj() {
+    this.toolbar.clickRunButton();
+    this.agHelper.Sleep(); //for function to run
+    this.agHelper.AssertElementAbsence(this.locator._btnSpinner, 15000);
+    this.agHelper.AssertElementAbsence(this.locator._empty, 5000);
+  }
+
+  public RenameJSObjFromPane(renameVal: string) {
+    cy.get(this._jsObjName).dblclick({ force: true });
     cy.get(this._jsObjTxt)
       .clear()
       .type(renameVal, { force: true })
       .should("have.value", renameVal)
       .blur();
-    this.agHelper.Sleep(); //allowing time for name change to reflect in EntityExplorer
+    PageLeftPane.assertPresence(renameVal);
   }
 
   public RenameJSObjFromExplorer(entityName: string, renameVal: string) {
-    this.ee.ActionContextMenuByEntityName("RenamedJSObject", "Edit Name");
+    this.ee.ActionContextMenuByEntityName({
+      entityNameinLeftSidebar: entityName,
+      action: "Rename",
+    });
     cy.xpath(this.locator._entityNameEditing(entityName)).type(
       renameVal + "{enter}",
     );
-    this.ee.AssertEntityPresenceInExplorer(renameVal);
-    this.agHelper.Sleep(); //allowing time for name change to reflect in EntityExplorer
+    PageLeftPane.assertPresence(renameVal);
   }
 
   public GetJSObjectName() {
@@ -214,42 +246,90 @@ export class JSEditor {
       .then((text) => cy.wrap(text).as("jsObjName"));
   }
 
-  public validateDefaultJSObjProperties(jsObjName: string) {
-    this.ee.ActionContextMenuByEntityName(jsObjName, "Show Bindings");
+  public ValidateDefaultJSObjProperties(jsObjName: string) {
+    this.ee.ActionContextMenuByEntityName({
+      entityNameinLeftSidebar: jsObjName,
+      action: "Show bindings",
+    });
     cy.get(this._propertyList).then(function ($lis) {
       const bindingsLength = $lis.length;
       expect(bindingsLength).to.be.at.least(4);
-      expect($lis.eq(0).text()).to.be.oneOf([
+      const expectedTexts = [
         "{{" + jsObjName + ".myFun2()}}",
         "{{" + jsObjName + ".myFun1()}}",
-      ]);
-      expect($lis.eq(1).text()).to.be.oneOf([
-        "{{" + jsObjName + ".myFun2()}}",
-        "{{" + jsObjName + ".myFun1()}}",
+        "{{" + jsObjName + ".myVar1}}",
+        "{{" + jsObjName + ".myVar2}}",
         "{{" + jsObjName + ".myFun2.data}}",
         "{{" + jsObjName + ".myFun1.data}}",
-      ]);
-      expect($lis.eq(bindingsLength - 2).text()).to.contain(
-        "{{" + jsObjName + ".myVar1}}",
-      );
-      expect($lis.eq(bindingsLength - 1).text()).to.contain(
-        "{{" + jsObjName + ".myVar2}}",
-      );
+      ];
+
+      let foundMatch = false;
+      for (let i = 0; i < bindingsLength; i++) {
+        const text = $lis.eq(i).text();
+        if (expectedTexts.includes(text)) {
+          foundMatch = true;
+          break;
+        }
+      }
+      expect(foundMatch).to.be.true;
     });
     cy.get(this._bindingsClose).click({ force: true });
   }
 
-
-  public EnableOnPageLoad(funName: string, onLoad = true, bfrCalling = true) {
-
-    this.agHelper.GetNClick(this._responseTabAction(funName))
-    this.agHelper.AssertElementPresence(this._dialog('Function settings'))
-    if (onLoad)
-      this.agHelper.CheckUncheck(this._functionSetting(Cypress.env("MESSAGES").JS_SETTINGS_ONPAGELOAD()), true)
-    if (bfrCalling)
-      this.agHelper.CheckUncheck(this._functionSetting(Cypress.env("MESSAGES").JS_SETTINGS_CONFIRM_EXECUTION()), true)
-
-    this.agHelper.GetNClick(this._closeSettings)
+  public VerifyAsyncFuncSettings(funName: string, onLoad = true) {
+    this.toolbar.toggleSettings();
+    this.agHelper.AssertExistingCheckedState(
+      this._onPageLoadSwitchStatus(funName),
+      onLoad.toString(),
+    );
+    this.toolbar.toggleSettings();
   }
 
+  public EnableDisableAsyncFuncSettings(funName: string, onLoad = true) {
+    // Navigate to Settings tab
+    this.toolbar.toggleSettings();
+    // Set onPageLoad
+    this.agHelper.CheckUncheck(this._onPageLoadSwitch(funName), onLoad);
+    // Return to code tab
+    this.toolbar.toggleSettings();
+  }
+
+  /**
+  There are two types of parse errors in the JS Editor
+  1. Parse errors that render the JS Object invalid and all functions unrunnable
+  2. Parse errors within functions that throw errors when executing those functions
+ */
+  public AssertParseError(exists: boolean) {
+    const { _jsObjectParseErrorCallout } = this;
+    // Assert presence/absence of parse error
+    cy.get(_jsObjectParseErrorCallout).should(exists ? "exist" : "not.exist");
+  }
+
+  public SelectFunctionDropdown(funName: string) {
+    cy.get(this.runFunctionSelectLocator).click();
+    this.agHelper.GetNClickByContains(this._funcDropdownOptions, funName);
+  }
+
+  public AssertSelectedFunction(funName: string) {
+    cy.get(this.runFunctionSelectLocator).contains(funName).should("exist");
+  }
+
+  public ConfirmationClick(type: "Yes" | "No") {
+    this.agHelper
+      .GetElement(this._confirmationModalBtns(type))
+      .eq(0)
+      .scrollIntoView()
+      .then(($element: any) => {
+        cy.get($element).trigger("click", {
+          force: true,
+        });
+      });
+
+    if (type == "Yes")
+      this.agHelper.AssertElementAbsence(
+        this.locator._specificToast("canceled"),
+      ); //Asserting NO is not clicked
+  }
+
+  //#endregion
 }

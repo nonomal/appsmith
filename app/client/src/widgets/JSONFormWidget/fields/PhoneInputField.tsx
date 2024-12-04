@@ -1,12 +1,10 @@
 import React, { useContext, useState } from "react";
 import { parseIncompletePhoneNumber } from "libphonenumber-js";
 
-import BaseInputField, {
-  BaseInputComponentProps,
-  parseRegex,
-} from "./BaseInputField";
+import type { BaseInputComponentProps } from "./BaseInputField";
+import BaseInputField, { parseRegex } from "./BaseInputField";
 import FormContext from "../FormContext";
-import { BaseFieldComponentProps } from "../constants";
+import type { BaseFieldComponentProps } from "../constants";
 import { RenderModes } from "constants/WidgetConstants";
 import ISDCodeDropdown, {
   getDefaultISDCode,
@@ -14,22 +12,23 @@ import ISDCodeDropdown, {
   ISDCodeDropdownOptions,
 } from "widgets/PhoneInputWidget/component/ISDCodeDropdown";
 import { isEmpty } from "../helper";
+import { BASE_LABEL_TEXT_SIZE } from "../component/FieldLabel";
 
 type PhoneInputComponentProps = BaseInputComponentProps & {
   allowDialCodeChange: boolean;
   dialCode: string;
 };
 
-export type PhoneInputFieldProps = BaseFieldComponentProps<
-  PhoneInputComponentProps
->;
+export type PhoneInputFieldProps =
+  BaseFieldComponentProps<PhoneInputComponentProps>;
 
-type ISDCodeDropdownComponentProps = {
+interface ISDCodeDropdownComponentProps {
   allowDialCodeChange: boolean;
   dialCode: string;
+  fieldName: string;
   isDisabled: boolean;
   propertyPath: string;
-};
+}
 
 const COMPONENT_DEFAULT_VALUES: PhoneInputComponentProps = {
   allowDialCodeChange: false,
@@ -38,6 +37,7 @@ const COMPONENT_DEFAULT_VALUES: PhoneInputComponentProps = {
   isRequired: false,
   isSpellCheck: false,
   isVisible: true,
+  labelTextSize: BASE_LABEL_TEXT_SIZE,
   label: "",
 };
 
@@ -45,7 +45,7 @@ export const isValid = (
   schemaItem: PhoneInputFieldProps["schemaItem"],
   inputValue?: string | null,
 ) => {
-  const isEmptyValue = !isEmpty(inputValue);
+  const isEmptyValue = isEmpty(inputValue);
 
   if (schemaItem.isRequired && isEmptyValue) {
     return false;
@@ -61,11 +61,12 @@ export const isValid = (
 
   const parsedRegex = parseRegex(schemaItem.regex);
 
-  return parsedRegex ? parsedRegex.test(inputValue) : isEmptyValue;
+  return !parsedRegex || parsedRegex.test(inputValue);
 };
 
 const transformValue = (value: string) => {
   const parsedValue = parseIncompletePhoneNumber(value);
+
   return {
     text: parsedValue,
     value: parsedValue,
@@ -75,6 +76,7 @@ const transformValue = (value: string) => {
 function ISDCodeDropdownComponent({
   allowDialCodeChange,
   dialCode,
+  fieldName,
   isDisabled,
   propertyPath,
 }: ISDCodeDropdownComponentProps) {
@@ -99,6 +101,7 @@ function ISDCodeDropdownComponent({
       onISDCodeChange={onISDCodeChange}
       options={ISDCodeDropdownOptions}
       selected={selectedISDCode}
+      widgetId={fieldName}
     />
   );
 }
@@ -114,6 +117,7 @@ function PhoneInputField({
     <ISDCodeDropdownComponent
       allowDialCodeChange={schemaItem.allowDialCodeChange}
       dialCode={schemaItem.dialCode}
+      fieldName={name}
       isDisabled={schemaItem.isDisabled}
       propertyPath={propertyPath}
     />

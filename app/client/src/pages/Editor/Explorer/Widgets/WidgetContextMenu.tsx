@@ -1,41 +1,38 @@
 import React, { useCallback } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import TreeDropdown, {
-  TreeDropdownOption,
-} from "pages/Editor/Explorer/TreeDropdown";
-import ContextMenuTrigger from "../ContextMenuTrigger";
-import { ContextMenuPopoverModifiers } from "../helpers";
-import { noop } from "lodash";
 import { initExplorerEntityNameEdit } from "actions/explorerActions";
-import { AppState } from "reducers";
+import type { AppState } from "ee/reducers";
 import {
   ReduxActionTypes,
   WidgetReduxActionTypes,
-} from "@appsmith/constants/ReduxActionConstants";
-import WidgetFactory from "utils/WidgetFactory";
+} from "ee/constants/ReduxActionConstants";
+import WidgetFactory from "WidgetProvider/factory";
 import { ENTITY_TYPE } from "entities/DataTree/dataTreeFactory";
-import { toggleShowDeviationDialog } from "actions/onboardingActions";
-import { inGuidedTour } from "selectors/onboardingSelectors";
+import type { TreeDropdownOption } from "pages/Editor/Explorer/ContextMenu";
+import ContextMenu from "pages/Editor/Explorer/ContextMenu";
 const WidgetTypes = WidgetFactory.widgetTypes;
 
 export function WidgetContextMenu(props: {
   widgetId: string;
   pageId: string;
   className?: string;
+  canManagePages?: boolean;
 }) {
   const { widgetId } = props;
   const parentId = useSelector((state: AppState) => {
-    return state.ui.pageWidgets[props.pageId][props.widgetId].parentId;
+    return state.ui.pageWidgets[props.pageId].dsl[props.widgetId].parentId;
   });
   const widget = useSelector((state: AppState) => {
-    return state.ui.pageWidgets[props.pageId][props.widgetId];
+    return state.ui.pageWidgets[props.pageId].dsl[props.widgetId];
   });
 
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const parentWidget: any = useSelector((state: AppState) => {
-    if (parentId) return state.ui.pageWidgets[props.pageId][parentId];
+    if (parentId) return state.ui.pageWidgets[props.pageId].dsl[parentId];
+
     return {};
   });
-  const guidedTourEnabled = useSelector(inGuidedTour);
   const dispatch = useDispatch();
   const dispatchDelete = useCallback(() => {
     // If the widget is a tab we are updating the `tabs` of the property of the widget
@@ -43,12 +40,14 @@ export function WidgetContextMenu(props: {
     if (widget.tabName && parentWidget.type === WidgetTypes.TABS_WIDGET) {
       const tabsObj = { ...parentWidget.tabsObj };
       const filteredTabs = Object.values(tabsObj);
+
       if (widget.parentId && !!filteredTabs.length) {
         dispatch({
           type: ReduxActionTypes.WIDGET_DELETE_TAB_CHILD,
           payload: { ...tabsObj[widget.tabId] },
         });
       }
+
       return;
     }
 
@@ -61,62 +60,58 @@ export function WidgetContextMenu(props: {
     });
   }, [dispatch, widgetId, parentId, widget, parentWidget]);
 
-  const showBinding = useCallback(
-    (widgetId, widgetName) =>
-      dispatch({
-        type: ReduxActionTypes.SET_ENTITY_INFO,
-        payload: {
-          entityId: widgetId,
-          entityName: widgetName,
-          entityType: ENTITY_TYPE.WIDGET,
-          show: true,
-        },
-      }),
-    [],
-  );
+  const showBinding = useCallback((widgetId, widgetName) => {
+    dispatch({
+      type: ReduxActionTypes.SET_ENTITY_INFO,
+      payload: {
+        entityId: widgetId,
+        entityName: widgetName,
+        entityType: ENTITY_TYPE.WIDGET,
+        show: true,
+      },
+    });
+  }, []);
 
   const editWidgetName = useCallback(() => {
-    if (guidedTourEnabled) {
-      dispatch(toggleShowDeviationDialog(true));
-      return;
-    }
     dispatch(initExplorerEntityNameEdit(widgetId));
-  }, [dispatch, widgetId, guidedTourEnabled]);
+  }, [dispatch, widgetId]);
 
   const optionTree: TreeDropdownOption[] = [
     {
-      value: "rename",
-      onSelect: editWidgetName,
-      label: "Edit Name",
-    },
-    {
       value: "showBinding",
       onSelect: () => showBinding(props.widgetId, widget.widgetName),
-      label: "Show Bindings",
+      label: "Show bindings",
     },
   ];
 
-  if (widget.isDeletable !== false) {
+  if (props.canManagePages) {
+    const option: TreeDropdownOption = {
+      value: "rename",
+      onSelect: editWidgetName,
+      label: "Rename",
+    };
+
+    optionTree.push(option);
+  }
+
+  if (widget.isDeletable !== false && props.canManagePages) {
     const option: TreeDropdownOption = {
       value: "delete",
       onSelect: dispatchDelete,
       label: "Delete",
       intent: "danger",
+      confirmDelete: true,
     };
 
     optionTree.push(option);
   }
-  return (
-    <TreeDropdown
+
+  return optionTree.length > 0 ? (
+    <ContextMenu
       className={props.className}
-      defaultText=""
-      modifiers={ContextMenuPopoverModifiers}
-      onSelect={noop}
-      optionTree={optionTree}
-      selectedValue=""
-      toggle={<ContextMenuTrigger className="t--context-menu" />}
+      optionTree={optionTree as TreeDropdownOption[]}
     />
-  );
+  ) : null;
 }
 
 WidgetContextMenu.displayName = "WidgetContextMenu";

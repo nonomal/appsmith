@@ -1,15 +1,23 @@
-import { get } from "lodash";
+import { get, set } from "lodash";
 
 import SchemaParser from "widgets/JSONFormWidget/schemaParser";
-import {
-  FieldType,
+import type {
   SchemaItem,
-  ARRAY_ITEM_KEY,
   Schema,
   HookResponse,
+  FieldThemeStylesheet,
 } from "../../constants";
+import { FieldType, ARRAY_ITEM_KEY, ROOT_SCHEMA_KEY } from "../../constants";
 import { getGrandParentPropertyPath, getParentPropertyPath } from "../helper";
-import { JSONFormWidgetProps } from "..";
+import type { JSONFormWidgetProps } from "..";
+import { getFieldStylesheet } from "widgets/JSONFormWidget/helper";
+import type {
+  ButtonStyles,
+  ChildStylesheet,
+  Stylesheet,
+} from "entities/AppTheming";
+import { processSchemaItemAutocomplete } from "components/propertyControls/JSONFormComputeControl";
+import { klonaRegularWithTelemetry } from "utils/helpers";
 
 export type HiddenFnParams = [JSONFormWidgetProps, string];
 
@@ -18,23 +26,42 @@ export const fieldTypeUpdateHook = (
   propertyPath: string,
   fieldType: FieldType,
 ): HookResponse => {
-  const { schema, widgetName } = props;
+  const { childStylesheet, schema, widgetName } = props;
   const schemaItemPath = getParentPropertyPath(propertyPath);
   const schemaItem: SchemaItem = get(props, schemaItemPath, {});
 
-  const options = {
+  const newSchemaItem = SchemaParser.getSchemaItemByFieldType(fieldType, {
     schemaItem,
     schemaItemPath,
     schema,
     widgetName,
+    fieldThemeStylesheets: childStylesheet,
+  });
+  const isInputOrEmailSelected = [
+    FieldType.EMAIL_INPUT,
+    FieldType.PASSWORD_INPUT,
+  ].includes(fieldType);
+
+  const schemaItemWithAutoFillState = isInputOrEmailSelected
+    ? {
+        ...newSchemaItem,
+        shouldAllowAutofill: true,
+      }
+    : newSchemaItem;
+  /**
+   * TODO(Ashit): Not suppose to update the whole schema but just
+   * the path within the schema. This is just a hack to make sure
+   * the new added paths gets into the dynamicBindingPathList until
+   * the updateProperty function is fixed.
+   */
+
+  const updatedSchema = {
+    schema: klonaRegularWithTelemetry(schema, "helper.fieldTypeUpdateHook"),
   };
 
-  const newSchemaItem = SchemaParser.getSchemaItemByFieldType(
-    fieldType,
-    options,
-  );
+  set(updatedSchema, schemaItemPath, schemaItemWithAutoFillState);
 
-  return [{ propertyPath: schemaItemPath, propertyValue: newSchemaItem }];
+  return [{ propertyPath: "schema", propertyValue: updatedSchema.schema }];
 };
 
 export const hiddenIfArrayItemIsObject = (
@@ -51,8 +78,7 @@ export const hiddenIfArrayItemIsObject = (
 
   return (
     schemaItem.identifier === ARRAY_ITEM_KEY &&
-    (schemaItem.fieldType === FieldType.OBJECT ||
-      schemaItem.fieldType === FieldType.ARRAY)
+    schemaItem.fieldType === FieldType.OBJECT
   );
 };
 
@@ -62,6 +88,7 @@ export const getSchemaItem = <TSchemaItem extends SchemaItem>(
 ) => {
   const parentPropertyPath = getParentPropertyPath(propertyPath);
   const schemaItem: TSchemaItem = get(props, parentPropertyPath, {});
+  const propertyName = propertyPath.split(".").slice(-1)[0]; // schema.__root_schema__.age.borderRadius -> borderRadius
 
   const fieldTypeMatches = (fieldType: FieldType) =>
     fieldType === schemaItem.fieldType;
@@ -73,19 +100,66 @@ export const getSchemaItem = <TSchemaItem extends SchemaItem>(
     fieldTypes: Readonly<FieldType[]> | FieldType[],
   ) => !fieldTypes.includes(schemaItem.fieldType);
 
-  const compute = (cb: (props: TSchemaItem) => any) => cb(schemaItem);
+  const fieldTypeIncludes = (fieldTypes: Readonly<FieldType[]> | FieldType[]) =>
+    fieldTypes.includes(schemaItem.fieldType);
+
+  const compute = <TReturnValue>(
+    cb: (props: TSchemaItem, propertyName: string) => TReturnValue,
+  ): TReturnValue => cb(schemaItem, propertyName);
 
   return {
     fieldTypeMatches,
     fieldTypeNotMatches,
     fieldTypeNotIncludes,
+    fieldTypeIncludes,
     compute,
+  };
+};
+
+export const getStylesheetValue = (
+  props: JSONFormWidgetProps,
+  propertyPath: string,
+  widgetStylesheet?: Stylesheet<ButtonStyles & ChildStylesheet>,
+) => {
+  return getSchemaItem(props, propertyPath).compute(
+    (schemaItem, propertyName) => {
+      const fieldStylesheet = getFieldStylesheet(
+        props.widgetName,
+        schemaItem.fieldType,
+        widgetStylesheet?.childStylesheet as FieldThemeStylesheet,
+      );
+
+      return fieldStylesheet[propertyName] || "";
+    },
+  );
+};
+
+export const getAutocompleteProperties = (props: JSONFormWidgetProps) => {
+  const { schema } = props;
+  const rootSchemaItem = schema[ROOT_SCHEMA_KEY] || {};
+  const { sourceData } = rootSchemaItem;
+
+  const formData = processSchemaItemAutocomplete(rootSchemaItem);
+
+  const fieldState = processSchemaItemAutocomplete(rootSchemaItem, {
+    isVisible: true,
+    isDisabled: true,
+    isRequired: true,
+    isValid: true,
+  });
+
+  return {
+    sourceData,
+    fieldState,
+    formData,
   };
 };
 
 const getUpdatedSchemaFor = (
   schema: Schema,
   propertyName: string,
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   propertyValue: any,
 ) => {
   const keys = Object.keys(schema);
@@ -137,4 +211,16 @@ export const updateChildrenDisabledStateHook = (
       },
     ];
   }
+};
+
+export const isFieldTypeArrayOrObject = (
+  props: JSONFormWidgetProps,
+  propertyPath: string,
+) => {
+  const schemaItem: SchemaItem = get(props, propertyPath, {});
+
+  return (
+    schemaItem.fieldType === FieldType.ARRAY ||
+    schemaItem.fieldType === FieldType.OBJECT
+  );
 };

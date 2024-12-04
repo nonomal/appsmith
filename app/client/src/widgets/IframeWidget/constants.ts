@@ -1,4 +1,4 @@
-import { WidgetProps } from "widgets/BaseWidget";
+import type { WidgetProps } from "widgets/BaseWidget";
 
 export interface IframeWidgetProps extends WidgetProps {
   source: string;
@@ -10,4 +10,6 @@ export interface IframeWidgetProps extends WidgetProps {
   borderColor?: string;
   borderOpacity?: number;
   borderWidth?: number;
+  borderRadius: string;
+  boxShadow?: string;
 }

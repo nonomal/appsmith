@@ -1,35 +1,33 @@
 import { get, set } from "lodash";
 
 import schemaTestData from "widgets/JSONFormWidget/schemaTestData";
+import type { Schema, SchemaItem } from "widgets/JSONFormWidget/constants";
 import {
   ARRAY_ITEM_KEY,
   DataType,
   FieldType,
-  Schema,
-  SchemaItem,
 } from "widgets/JSONFormWidget/constants";
-import { JSONFormWidgetProps } from "..";
+import type { JSONFormWidgetProps } from "..";
 import {
   fieldTypeUpdateHook,
   getSchemaItem,
+  getStylesheetValue,
   hiddenIfArrayItemIsObject,
   updateChildrenDisabledStateHook,
 } from "./helper";
 
-import { klona } from "klona/full";
+import { klona as clone } from "klona/full";
 
 const widgetName = "JSONForm1";
 
 describe(".fieldTypeUpdateHook", () => {
   it("updates valid new schema item for a field type multiselect -> array", () => {
     const schema = schemaTestData.initialDataset.schemaOutput;
-    const propertyPath = "schema.__root_schema__.children.hobbies.fieldType";
+    const schemaItemPath = "__root_schema__.children.hobbies";
+    const propertyPath = `schema.${schemaItemPath}.fieldType`;
     const fieldType = FieldType.ARRAY;
 
-    const oldSchemaItem: SchemaItem = get(
-      schema,
-      "__root_schema__.children.hobbies",
-    );
+    const oldSchemaItem: SchemaItem = get(schema, schemaItemPath);
 
     const expectedNewSchemaItem = {
       isCollapsible: true,
@@ -56,6 +54,12 @@ describe(".fieldTypeUpdateHook", () => {
           originalIdentifier: ARRAY_ITEM_KEY,
           isSpellCheck: false,
           position: -1,
+          accentColor:
+            "{{((sourceData, formData, fieldState) => ((appsmith.theme.colors.primaryColor)))(JSONForm1.sourceData, JSONForm1.formData, JSONForm1.fieldState)}}",
+          borderRadius:
+            "{{((sourceData, formData, fieldState) => ((appsmith.theme.borderRadius.appBorderRadius)))(JSONForm1.sourceData, JSONForm1.formData, JSONForm1.fieldState)}}",
+          boxShadow: "none",
+          labelTextSize: "0.875rem",
         },
       },
       dataType: DataType.ARRAY,
@@ -68,27 +72,37 @@ describe(".fieldTypeUpdateHook", () => {
       identifier: "hobbies",
       originalIdentifier: "hobbies",
       position: 4,
+      labelTextSize: "0.875rem",
     };
+
+    const expectedNewSchema = set(
+      clone(schema),
+      schemaItemPath,
+      expectedNewSchemaItem,
+    );
 
     const [result] =
       fieldTypeUpdateHook(
-        ({ schema, widgetName } as unknown) as JSONFormWidgetProps,
+        {
+          schema,
+          widgetName,
+          childStylesheet: schemaTestData.fieldThemeStylesheets,
+        } as unknown as JSONFormWidgetProps,
         propertyPath,
         fieldType,
       ) || [];
 
-    const newSchemaItem: SchemaItem = result.propertyValue;
+    const newSchema: SchemaItem = result.propertyValue;
 
-    expect(result.propertyPath).toEqual(
-      "schema.__root_schema__.children.hobbies",
-    );
+    expect(result.propertyPath).toEqual("schema");
     expect(oldSchemaItem.fieldType).toEqual(FieldType.MULTISELECT);
-    expect(newSchemaItem).toEqual(expectedNewSchemaItem);
+    expect(newSchema).toEqual(expectedNewSchema);
   });
 
   it("updates valid new schema item for a field type array -> multiselect", () => {
-    const schema = klona(schemaTestData.initialDataset.schemaOutput);
-    const propertyPath = "schema.__root_schema__.children.hobbies.fieldType";
+    const oldSchema = clone(schemaTestData.initialDataset.schemaOutput);
+    const schemaItemPath = "__root_schema__.children.hobbies";
+    const propertyPath = `schema.${schemaItemPath}.fieldType`;
     const fieldType = FieldType.MULTISELECT;
 
     const oldSchemaItem = {
@@ -113,6 +127,9 @@ describe(".fieldTypeUpdateHook", () => {
           originalIdentifier: ARRAY_ITEM_KEY,
           isSpellCheck: false,
           position: -1,
+          accentColor: "{{appsmith.theme.colors.primaryColor}}",
+          borderRadius: "{{appsmith.theme.borderRadius.appBorderRadius}}",
+          boxShadow: "none",
         },
       },
       dataType: DataType.ARRAY,
@@ -128,28 +145,26 @@ describe(".fieldTypeUpdateHook", () => {
       position: 4,
     };
 
-    const expectedNewSchemaItem = get(
-      schema,
-      "__root_schema__.children.hobbies",
-      {},
-    );
+    const expectedNewSchema = clone(schemaTestData.initialDataset.schemaOutput);
 
-    set(schema, "__root_schema__.children.hobbies", oldSchemaItem);
+    set(oldSchema, "__root_schema__.children.hobbies", oldSchemaItem);
 
     const [result] =
       fieldTypeUpdateHook(
-        ({ schema, widgetName } as unknown) as JSONFormWidgetProps,
+        {
+          schema: oldSchema,
+          widgetName,
+          childStylesheet: schemaTestData.fieldThemeStylesheets,
+        } as unknown as JSONFormWidgetProps,
         propertyPath,
         fieldType,
       ) || [];
 
-    const newSchemaItem: SchemaItem = result.propertyValue;
+    const newSchema: SchemaItem = result.propertyValue;
 
-    expect(result.propertyPath).toEqual(
-      "schema.__root_schema__.children.hobbies",
-    );
+    expect(result.propertyPath).toEqual("schema");
     expect(oldSchemaItem.fieldType).toEqual(FieldType.ARRAY);
-    expect(newSchemaItem).toEqual(expectedNewSchemaItem);
+    expect(newSchema).toEqual(expectedNewSchema);
   });
 });
 
@@ -166,9 +181,9 @@ describe(".hiddenIfArrayItemIsObject", () => {
 
     inputs.forEach((input, index) => {
       const result = hiddenIfArrayItemIsObject(
-        ({
+        {
           schema,
-        } as unknown) as JSONFormWidgetProps,
+        } as unknown as JSONFormWidgetProps,
         input,
       );
 
@@ -188,9 +203,9 @@ describe(".hiddenIfArrayItemIsObject", () => {
 
     inputs.forEach((input, index) => {
       const result = hiddenIfArrayItemIsObject(
-        ({
+        {
           schema,
-        } as unknown) as JSONFormWidgetProps,
+        } as unknown as JSONFormWidgetProps,
         input,
         {
           checkGrandParentPath: true,
@@ -208,9 +223,9 @@ describe(".getSchemaItem", () => {
     const propertyPath = "schema.__root_schema__.children.hobbies.fieldType";
 
     const result = getSchemaItem(
-      ({
+      {
         schema,
-      } as unknown) as JSONFormWidgetProps,
+      } as unknown as JSONFormWidgetProps,
       propertyPath,
     );
 
@@ -233,9 +248,9 @@ describe(".getSchemaItem", () => {
 
     inputs.forEach((input, index) => {
       const result = getSchemaItem(
-        ({
+        {
           schema,
-        } as unknown) as JSONFormWidgetProps,
+        } as unknown as JSONFormWidgetProps,
         propertyPath,
       ).fieldTypeMatches(input);
 
@@ -256,9 +271,9 @@ describe(".getSchemaItem", () => {
 
     inputs.forEach((input, index) => {
       const result = getSchemaItem(
-        ({
+        {
           schema,
-        } as unknown) as JSONFormWidgetProps,
+        } as unknown as JSONFormWidgetProps,
         propertyPath,
       ).fieldTypeNotMatches(input);
 
@@ -278,9 +293,9 @@ describe(".getSchemaItem", () => {
 
     inputs.forEach((input, index) => {
       const result = getSchemaItem(
-        ({
+        {
           schema,
-        } as unknown) as JSONFormWidgetProps,
+        } as unknown as JSONFormWidgetProps,
         propertyPath,
       ).fieldTypeNotIncludes(input);
 
@@ -295,9 +310,9 @@ describe(".getSchemaItem", () => {
     const expectedOutput = get(schema, "__root_schema__.children.hobbies");
 
     const result = getSchemaItem(
-      ({
+      {
         schema,
-      } as unknown) as JSONFormWidgetProps,
+      } as unknown as JSONFormWidgetProps,
       propertyPath,
     ).compute((schemaItem) => schemaItem);
 
@@ -317,9 +332,9 @@ describe(".updateChildrenDisabledStateHook", () => {
 
     const [result] =
       updateChildrenDisabledStateHook(
-        ({
+        {
           schema,
-        } as unknown) as JSONFormWidgetProps,
+        } as unknown as JSONFormWidgetProps,
         propertyPath,
         isDisabled,
       ) || [];
@@ -346,5 +361,34 @@ describe(".updateChildrenDisabledStateHook", () => {
     expect(updatedSchema.__array_item__.children.boolean.isDisabled).toEqual(
       true,
     );
+  });
+});
+
+describe(".getStylesheetValue", () => {
+  it("returns valid stylesheet value", () => {
+    const props = {
+      widgetName: "Form1",
+      schema: schemaTestData.initialDataset.schemaOutput,
+    } as unknown as JSONFormWidgetProps;
+
+    const inputAndExpectedOutput = [
+      ["", ""],
+      ["schema.__root_schema__.children.education.isDisabled", ""],
+      [
+        "schema.__root_schema__.children.name.borderRadius",
+        "{{((sourceData, formData, fieldState) => ((appsmith.theme.borderRadius.appBorderRadius)))(Form1.sourceData, Form1.formData, Form1.fieldState)}}",
+      ],
+      ["schema", ""],
+    ];
+
+    inputAndExpectedOutput.forEach(([input, expectedOutput]) => {
+      const result = getStylesheetValue(props, input, {
+        childStylesheet: schemaTestData.fieldThemeStylesheets,
+        // TODO: Fix this the next time the file is edited
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
+      expect(result).toEqual(expectedOutput);
+    });
   });
 });

@@ -1,4 +1,5 @@
-import React, { RefObject, createRef } from "react";
+import type { RefObject } from "react";
+import React, { createRef } from "react";
 import { sortBy } from "lodash";
 import {
   Alignment,
@@ -6,33 +7,31 @@ import {
   Menu,
   MenuItem,
   Classes as CoreClass,
+  Spinner,
 } from "@blueprintjs/core";
 import { Classes, Popover2 } from "@blueprintjs/popover2";
-import { IconName } from "@blueprintjs/icons";
+import type { IconName } from "@blueprintjs/icons";
 import tinycolor from "tinycolor2";
 import { darkenActive, darkenHover } from "constants/DefaultTheme";
-import {
-  ButtonBoxShadow,
-  ButtonBoxShadowTypes,
-  ButtonBorderRadius,
-  ButtonBorderRadiusTypes,
+import type {
   ButtonStyleType,
   ButtonVariant,
-  ButtonVariantTypes,
   ButtonPlacement,
 } from "components/constants";
-import { ThemeProp } from "components/ads/common";
+import { ButtonVariantTypes } from "components/constants";
 import styled, { createGlobalStyle } from "styled-components";
-import { Colors } from "constants/Colors";
 import {
   getCustomBackgroundColor,
   getCustomBorderColor,
-  getCustomTextColor,
   getCustomJustifyContent,
+  getComplementaryGrayscaleColor,
 } from "widgets/WidgetUtils";
-import { RenderMode, RenderModes } from "constants/WidgetConstants";
+import type { RenderMode } from "constants/WidgetConstants";
+import { RenderModes } from "constants/WidgetConstants";
 import { DragContainer } from "widgets/ButtonWidget/component/DragContainer";
 import { buttonHoverActiveStyles } from "../../ButtonWidget/component/utils";
+import { THEMEING_TEXT_SIZES } from "constants/ThemeConstants";
+import type { ThemeProp } from "WidgetProvider/constants";
 
 // Utility functions
 interface ButtonData {
@@ -41,6 +40,7 @@ interface ButtonData {
   label?: string;
   iconName?: string;
 }
+
 // Extract props influencing to width change
 const getButtonData = (
   groupButtons: Record<string, GroupButtonProps>,
@@ -65,9 +65,9 @@ const getButtonData = (
 
 interface WrapperStyleProps {
   isHorizontal: boolean;
-  borderRadius?: ButtonBorderRadius;
-  boxShadow?: ButtonBoxShadow;
-  boxShadowColor?: string;
+  borderRadius?: string;
+  boxShadow?: string;
+  buttonVariant: ButtonVariant;
 }
 
 const ButtonGroupWrapper = styled.div<ThemeProp & WrapperStyleProps>`
@@ -78,38 +78,36 @@ const ButtonGroupWrapper = styled.div<ThemeProp & WrapperStyleProps>`
   justify-content: stretch;
   align-items: stretch;
   overflow: hidden;
+  cursor: not-allowed;
+  gap: ${({ buttonVariant }) =>
+    `${buttonVariant === ButtonVariantTypes.PRIMARY ? "1px" : "0px"}`};
 
   ${(props) =>
     props.isHorizontal ? "flex-direction: row" : "flex-direction: column"};
+  box-shadow: ${({ boxShadow }) => boxShadow};
+  border-radius: ${({ borderRadius }) => borderRadius};
 
-  border-radius: ${({ borderRadius }) =>
-    borderRadius === ButtonBorderRadiusTypes.ROUNDED
-      ? "8px"
-      : borderRadius === ButtonBorderRadiusTypes.CIRCLE
-      ? "32px"
-      : "0px"};
+  & > *:first-child,
+  & > *:first-child button {
+    border-radius: ${({ borderRadius, isHorizontal }) =>
+      isHorizontal
+        ? `${borderRadius} 0px 0px ${borderRadius}`
+        : `${borderRadius} ${borderRadius} 0px 0px`};
+  }
 
-  box-shadow: ${({ boxShadow, boxShadowColor, theme }) =>
-    boxShadow === ButtonBoxShadowTypes.VARIANT1
-      ? `0px 0px 4px 3px ${boxShadowColor ||
-          theme.colors.button.boxShadow.default.variant1}`
-      : boxShadow === ButtonBoxShadowTypes.VARIANT2
-      ? `3px 3px 4px ${boxShadowColor ||
-          theme.colors.button.boxShadow.default.variant2}`
-      : boxShadow === ButtonBoxShadowTypes.VARIANT3
-      ? `0px 1px 3px ${boxShadowColor ||
-          theme.colors.button.boxShadow.default.variant3}`
-      : boxShadow === ButtonBoxShadowTypes.VARIANT4
-      ? `2px 2px 0px ${boxShadowColor ||
-          theme.colors.button.boxShadow.default.variant4}`
-      : boxShadow === ButtonBoxShadowTypes.VARIANT5
-      ? `-2px -2px 0px ${boxShadowColor ||
-          theme.colors.button.boxShadow.default.variant5}`
-      : "none"} !important;
+  & > *:last-child,
+  & > *:last-child button {
+    border-radius: ${({ borderRadius, isHorizontal }) =>
+      isHorizontal
+        ? `0px ${borderRadius} ${borderRadius} 0`
+        : `0px 0px ${borderRadius} ${borderRadius}`};
+  }
 `;
 
 const MenuButtonWrapper = styled.div<{ renderMode: RenderMode }>`
   flex: 1 1 auto;
+  cursor: pointer;
+  position: relative;
 
   ${({ renderMode }) => renderMode === RenderModes.CANVAS && `height: 100%`};
 
@@ -127,32 +125,43 @@ const PopoverStyles = createGlobalStyle<{
   minPopoverWidth: number;
   popoverTargetWidth?: number;
   id: string;
+  borderRadius?: string;
 }>`
-  .menu-button-popover > .${Classes.POPOVER2_CONTENT} {
-    background: none;
-  }
-  ${({ id, minPopoverWidth, popoverTargetWidth }) => `
-    .menu-button-width-${id} {
+  ${({ borderRadius, id, minPopoverWidth, popoverTargetWidth }) => `
+    .${id}.${Classes.POPOVER2} {
+      background: none;
+      box-shadow: 0 6px 20px 0px rgba(0, 0, 0, 0.15) !important;
+      margin-top: 8px !important;
+      margin-bottom: 8px !important;
+      border-radius: ${
+        borderRadius === THEMEING_TEXT_SIZES.lg ? `0.375rem` : borderRadius
+      };
+      box-shadow: none;
+      overflow: hidden;
       ${popoverTargetWidth && `width: ${popoverTargetWidth}px`};
       min-width: ${minPopoverWidth}px;
+    }
+
+    .button-group-menu-popover > .${Classes.POPOVER2_CONTENT} {
+      background: none;
     }
   `}
 `;
 
 interface ButtonStyleProps {
   isHorizontal: boolean;
-  borderRadius?: ButtonBorderRadius;
-  borderRadOnStart: boolean;
-  borderRadOnEnd: boolean;
+  borderRadius?: string;
   buttonVariant?: ButtonVariant; // solid | outline | ghost
   buttonColor?: string;
   iconAlign?: string;
   placement?: ButtonPlacement;
   isLabel: boolean;
+  minWidth?: number;
+  minHeight?: number;
 }
 
 /*
-  Don't use buttonHoverActiveStyles in a nested function it won't work - 
+  Don't use buttonHoverActiveStyles in a nested function it won't work -
 
   const buttonHoverActiveStyles = css ``
 
@@ -177,29 +186,25 @@ const StyledButton = styled.button<ThemeProp & ButtonStyleProps>`
   align-items: center;
   padding: 0px 10px;
 
+  ${({ minHeight, minWidth }) => `
+    ${minWidth ? `min-width: ${minWidth}px;` : ""}
+    ${minHeight ? `min-height: ${minHeight}px;` : ""}
+  `};
+
   &:hover,
-  &:active {
+  &:active,
+  &:focus {
     ${buttonHoverActiveStyles}
   }
 
-  ${({
-    borderRadius,
-    borderRadOnEnd,
-    borderRadOnStart,
-    buttonColor,
-    buttonVariant,
-    iconAlign,
-    isHorizontal,
-    isLabel,
-    theme,
-  }) => `
+  ${({ buttonColor, buttonVariant, iconAlign, isLabel, theme }) => `
     & {
       background: ${
         getCustomBackgroundColor(buttonVariant, buttonColor) !== "none"
           ? getCustomBackgroundColor(buttonVariant, buttonColor)
           : buttonVariant === ButtonVariantTypes.PRIMARY
-          ? theme.colors.button.primary.primary.bgColor
-          : "none"
+            ? theme.colors.button.primary.primary.bgColor
+            : "none"
       } !important;
       flex-direction : ${iconAlign === "right" ? "row-reverse" : "row"};
       .bp3-icon {
@@ -213,73 +218,39 @@ const StyledButton = styled.button<ThemeProp & ButtonStyleProps>`
       }
     }
 
-
     border: ${
       getCustomBorderColor(buttonVariant, buttonColor) !== "none"
         ? `1px solid ${getCustomBorderColor(buttonVariant, buttonColor)}`
         : buttonVariant === ButtonVariantTypes.SECONDARY
-        ? `1px solid ${theme.colors.button.primary.secondary.borderColor}`
-        : "none"
+          ? `1px solid ${theme.colors.button.primary.secondary.borderColor}`
+          : "none"
     } ${buttonVariant === ButtonVariantTypes.PRIMARY ? "" : "!important"};
-
-    ${
-      isHorizontal
-        ? buttonVariant === ButtonVariantTypes.PRIMARY
-          ? borderRadOnEnd
-            ? ""
-            : `
-            border-right: 1px solid ${getCustomTextColor(theme, buttonColor)};
-          `
-          : ""
-        : buttonVariant === ButtonVariantTypes.PRIMARY
-        ? borderRadOnEnd
-          ? ""
-          : `
-          border-bottom: 1px solid ${getCustomTextColor(theme, buttonColor)};
-        `
-        : ""
-    }
-
-    border-radius: ${
-      borderRadius === ButtonBorderRadiusTypes.ROUNDED
-        ? borderRadOnStart // first button
-          ? isHorizontal
-            ? "8px 0px 0px 8px"
-            : "8px 8px 0px 0px"
-          : borderRadOnEnd // last button
-          ? isHorizontal
-            ? "0px 8px 8px 0px"
-            : "0px 0px 8px 8px"
-          : "0px"
-        : borderRadius === ButtonBorderRadiusTypes.CIRCLE
-        ? borderRadOnStart // first button
-          ? isHorizontal
-            ? "32px 0px 0px 32px"
-            : "32px 32px 0px 0px"
-          : borderRadOnEnd // last button
-          ? isHorizontal
-            ? "0px 32px 32px 0px"
-            : "0px 0px 32px 32px"
-          : "0px"
-        : "0px"
-    };
 
     & span {
       color: ${
         buttonVariant === ButtonVariantTypes.PRIMARY
-          ? getCustomTextColor(theme, buttonColor)
+          ? getComplementaryGrayscaleColor(buttonColor)
           : getCustomBackgroundColor(ButtonVariantTypes.PRIMARY, buttonColor)
       } !important;
     }
 
-    &:disabled { 
+
+    &:disabled {
       cursor: not-allowed;
-      border: 1px solid ${Colors.ALTO2} !important;
-      background: ${theme.colors.button.disabled.bgColor} !important;
+      border: ${
+        buttonVariant === ButtonVariantTypes.SECONDARY &&
+        "1px solid var(--wds-color-border-disabled)"
+      } !important;
+      background: ${
+        buttonVariant !== ButtonVariantTypes.TERTIARY &&
+        "var(--wds-color-bg-disabled)"
+      } !important;
+
       span {
-        color: ${theme.colors.button.disabled.textColor} !important;
+        color: var(--wds-color-text-disabled) !important;
       }
     }
+
   `}
 `;
 
@@ -297,9 +268,8 @@ const StyledButtonContent = styled.div<{
 
 export interface BaseStyleProps {
   backgroundColor?: string;
-  borderRadius?: ButtonBorderRadius;
-  boxShadow?: ButtonBoxShadow;
-  boxShadowColor?: string;
+  borderRadius?: string;
+  boxShadow?: string;
   buttonColor?: string;
   buttonStyle?: ButtonStyleType;
   buttonVariant?: ButtonVariant;
@@ -308,11 +278,12 @@ export interface BaseStyleProps {
 
 const BaseMenuItem = styled(MenuItem)<ThemeProp & BaseStyleProps>`
   padding: 8px 10px !important;
+  border-radius: 0px;
   ${({ backgroundColor, theme }) =>
     backgroundColor
       ? `
       background-color: ${backgroundColor} !important;
-      &:hover {
+      &:hover, &:focus {
         background-color: ${darkenHover(backgroundColor)} !important;
       }
       &:active {
@@ -321,7 +292,7 @@ const BaseMenuItem = styled(MenuItem)<ThemeProp & BaseStyleProps>`
   `
       : `
     background: none !important
-      &:hover {
+      &:hover, &:focus {
         background-color: ${tinycolor(
           theme.colors.button.primary.primary.textColor,
         )
@@ -349,6 +320,7 @@ const StyledMenu = styled(Menu)`
 `;
 
 interface PopoverContentProps {
+  buttonId: string;
   menuItems: Record<
     string,
     {
@@ -366,15 +338,16 @@ interface PopoverContentProps {
       onClick?: string;
     }
   >;
-  onItemClicked: (onClick: string | undefined) => void;
+  onItemClicked: (onClick: string | undefined, buttonId: string) => void;
 }
 
 function PopoverContent(props: PopoverContentProps) {
-  const { menuItems, onItemClicked } = props;
+  const { buttonId, menuItems, onItemClicked } = props;
 
   let items = Object.keys(menuItems)
     .map((itemKey) => menuItems[itemKey])
     .filter((item) => item.isVisible === true);
+
   // sort btns by index
   items = sortBy(items, ["index"]);
 
@@ -390,26 +363,23 @@ function PopoverContent(props: PopoverContentProps) {
       onClick,
       textColor,
     } = menuItem;
-    if (iconAlign === Alignment.RIGHT) {
-      return (
-        <BaseMenuItem
-          backgroundColor={backgroundColor}
-          disabled={isDisabled}
-          key={id}
-          labelElement={<Icon color={iconColor} icon={iconName} />}
-          onClick={() => onItemClicked(onClick)}
-          text={label}
-          textColor={textColor}
-        />
-      );
-    }
+
     return (
       <BaseMenuItem
         backgroundColor={backgroundColor}
         disabled={isDisabled}
-        icon={<Icon color={iconColor} icon={iconName} />}
+        icon={
+          iconAlign !== Alignment.RIGHT && iconName ? (
+            <Icon color={iconColor} icon={iconName} />
+          ) : null
+        }
         key={id}
-        onClick={() => onItemClicked(onClick)}
+        labelElement={
+          iconAlign === Alignment.RIGHT && iconName ? (
+            <Icon color={iconColor} icon={iconName} />
+          ) : null
+        }
+        onClick={() => onItemClicked(onClick, buttonId)}
         text={label}
         textColor={textColor}
       />
@@ -430,6 +400,7 @@ class ButtonGroupComponent extends React.Component<
     this.state = {
       itemRefs: {},
       itemWidths: {},
+      loadedBtnId: "",
     };
   }
 
@@ -463,6 +434,7 @@ class ButtonGroupComponent extends React.Component<
       if (this.timer) {
         clearTimeout(this.timer);
       }
+
       this.timer = setTimeout(() => {
         this.setState(() => {
           return {
@@ -525,6 +497,7 @@ class ButtonGroupComponent extends React.Component<
           [id]: this.state.itemRefs[id].current?.getBoundingClientRect().width,
         };
       }
+
       return acc;
     }, {});
 
@@ -537,11 +510,29 @@ class ButtonGroupComponent extends React.Component<
           [id]: createRef(),
         };
       }
+
       return acc;
     }, {});
 
-  onButtonClick = (onClick: string | undefined) => {
-    this.props.buttonClickHandler(onClick);
+  // Start Loading
+  handleActionStart = (id: string) => {
+    this.setState({
+      loadedBtnId: id,
+    });
+  };
+
+  // Stop Loading
+  handleActionComplete = () => {
+    this.setState({
+      loadedBtnId: "",
+    });
+  };
+
+  onButtonClick = (onClick: string | undefined, buttonId: string) => {
+    if (onClick) {
+      this.handleActionStart(buttonId);
+      this.props.buttonClickHandler(onClick, () => this.handleActionComplete());
+    }
   };
 
   render = () => {
@@ -553,36 +544,48 @@ class ButtonGroupComponent extends React.Component<
       orientation,
       widgetId,
     } = this.props;
+    const { loadedBtnId } = this.state;
     const isHorizontal = orientation === "horizontal";
 
     let items = Object.keys(groupButtons)
       .map((itemKey) => groupButtons[itemKey])
       .filter((item) => item.isVisible === true);
+
     // sort btns by index
     items = sortBy(items, ["index"]);
+    const popoverId = `button-group-${widgetId}`;
+
+    const getOnClick = (button: GroupButtonProps) => {
+      if (!button.onClick) return;
+
+      return () => {
+        this.onButtonClick(button.onClick, button.id);
+      };
+    };
 
     return (
       <ButtonGroupWrapper
         borderRadius={this.props.borderRadius}
         boxShadow={this.props.boxShadow}
-        boxShadowColor={this.props.boxShadowColor}
+        buttonVariant={this.props.buttonVariant}
         className="t--buttongroup-widget"
         isHorizontal={isHorizontal}
       >
         {items.map((button) => {
-          const borderRadOnStart = button.index === 0;
-          const borderRadOnEnd = button.index === items.length - 1;
-          const isButtonDisabled = button.isDisabled || isDisabled;
+          const isLoading = button.id === loadedBtnId;
+          const isButtonDisabled =
+            button.isDisabled || isDisabled || !!loadedBtnId || isLoading;
 
           if (button.buttonType === "MENU" && !isButtonDisabled) {
             const { menuItems } = button;
-            const popoverId = `${widgetId}-${button.id}`;
+
             return (
               <MenuButtonWrapper
                 key={button.id}
                 renderMode={this.props.renderMode}
               >
                 <PopoverStyles
+                  borderRadius={this.props.borderRadius}
                   id={popoverId}
                   minPopoverWidth={minPopoverWidth}
                   popoverTargetWidth={this.state.itemWidths[button.id]}
@@ -590,6 +593,7 @@ class ButtonGroupComponent extends React.Component<
                 <Popover2
                   content={
                     <PopoverContent
+                      buttonId={button.id}
                       menuItems={menuItems || {}}
                       onItemClicked={this.onButtonClick}
                     />
@@ -598,17 +602,16 @@ class ButtonGroupComponent extends React.Component<
                   fill
                   minimal
                   placement="bottom-end"
-                  popoverClassName={`menu-button-popover menu-button-width-${popoverId}`}
+                  popoverClassName={popoverId}
                 >
                   <DragContainer
                     buttonColor={button.buttonColor}
                     buttonVariant={buttonVariant}
                     disabled={isButtonDisabled}
+                    loading={!!loadedBtnId}
                     renderMode={this.props.renderMode}
                   >
                     <StyledButton
-                      borderRadOnEnd={borderRadOnEnd}
-                      borderRadOnStart={borderRadOnStart}
                       borderRadius={this.props.borderRadius}
                       buttonColor={button.buttonColor}
                       buttonVariant={buttonVariant}
@@ -617,17 +620,25 @@ class ButtonGroupComponent extends React.Component<
                       isHorizontal={isHorizontal}
                       isLabel={!!button.label}
                       key={button.id}
+                      minHeight={this.props.minHeight}
+                      minWidth={this.props.buttonMinWidth}
                       ref={this.state.itemRefs[button.id]}
                     >
                       <StyledButtonContent
                         iconAlign={button.iconAlign || "left"}
                         placement={button.placement}
                       >
-                        {button.iconName && <Icon icon={button.iconName} />}
-                        {!!button.label && (
-                          <span className={CoreClass.BUTTON_TEXT}>
-                            {button.label}
-                          </span>
+                        {isLoading ? (
+                          <Spinner size={18} />
+                        ) : (
+                          <>
+                            {button.iconName && <Icon icon={button.iconName} />}
+                            {!!button.label && (
+                              <span className={CoreClass.BUTTON_TEXT}>
+                                {button.label}
+                              </span>
+                            )}
+                          </>
                         )}
                       </StyledButtonContent>
                     </StyledButton>
@@ -636,21 +647,19 @@ class ButtonGroupComponent extends React.Component<
               </MenuButtonWrapper>
             );
           }
+
           return (
             <DragContainer
               buttonColor={button.buttonColor}
               buttonVariant={buttonVariant}
               disabled={isButtonDisabled}
               key={button.id}
-              onClick={() => {
-                this.onButtonClick(button.onClick);
-              }}
+              loading={!!loadedBtnId}
+              onClick={getOnClick(button)}
               renderMode={this.props.renderMode}
               style={{ flex: "1 1 auto" }}
             >
               <StyledButton
-                borderRadOnEnd={borderRadOnEnd}
-                borderRadOnStart={borderRadOnStart}
                 borderRadius={this.props.borderRadius}
                 buttonColor={button.buttonColor}
                 buttonVariant={buttonVariant}
@@ -658,17 +667,25 @@ class ButtonGroupComponent extends React.Component<
                 iconAlign={button.iconAlign}
                 isHorizontal={isHorizontal}
                 isLabel={!!button.label}
-                onClick={() => this.onButtonClick(button.onClick)}
+                minHeight={this.props.minHeight}
+                minWidth={this.props.buttonMinWidth}
+                onClick={getOnClick(button)}
               >
                 <StyledButtonContent
                   iconAlign={button.iconAlign || "left"}
                   placement={button.placement}
                 >
-                  {button.iconName && <Icon icon={button.iconName} />}
-                  {!!button.label && (
-                    <span className={CoreClass.BUTTON_TEXT}>
-                      {button.label}
-                    </span>
+                  {isLoading ? (
+                    <Spinner size={18} />
+                  ) : (
+                    <>
+                      {button.iconName && <Icon icon={button.iconName} />}
+                      {!!button.label && (
+                        <span className={CoreClass.BUTTON_TEXT}>
+                          {button.label}
+                        </span>
+                      )}
+                    </>
                   )}
                 </StyledButtonContent>
               </StyledButton>
@@ -713,11 +730,13 @@ interface GroupButtonProps {
 }
 
 export interface ButtonGroupComponentProps {
-  borderRadius?: ButtonBorderRadius;
-  boxShadow?: ButtonBoxShadow;
-  boxShadowColor?: string;
+  borderRadius?: string;
+  boxShadow?: string;
   buttonVariant: ButtonVariant;
-  buttonClickHandler: (onClick: string | undefined) => void;
+  buttonClickHandler: (
+    onClick: string | undefined,
+    callback: () => void,
+  ) => void;
   groupButtons: Record<string, GroupButtonProps>;
   isDisabled: boolean;
   orientation: string;
@@ -725,11 +744,14 @@ export interface ButtonGroupComponentProps {
   width: number;
   minPopoverWidth: number;
   widgetId: string;
+  buttonMinWidth?: number;
+  minHeight?: number;
 }
 
 export interface ButtonGroupComponentState {
   itemRefs: Record<string, RefObject<HTMLButtonElement>>;
   itemWidths: Record<string, number>;
+  loadedBtnId: string;
 }
 
 export default ButtonGroupComponent;

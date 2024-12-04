@@ -1,29 +1,40 @@
-import React, { ReactNode, useCallback, useState } from "react";
-import { useDispatch } from "react-redux";
-import TreeDropdown, {
-  TreeDropdownOption,
-} from "pages/Editor/Explorer/TreeDropdown";
-import { noop } from "lodash";
-import ContextMenuTrigger from "../ContextMenuTrigger";
-import AnalyticsUtil from "utils/AnalyticsUtil";
-import { ContextMenuPopoverModifiers } from "../helpers";
+import type { ReactNode } from "react";
+import React, { useCallback, useMemo, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import AnalyticsUtil from "ee/utils/AnalyticsUtil";
 import { initExplorerEntityNameEdit } from "actions/explorerActions";
 import {
   clonePageInit,
-  deletePage,
+  deletePageAction,
   setPageAsDefault,
-  updatePage,
+  updatePageAction,
 } from "actions/pageActions";
 import styled from "styled-components";
-import { Icon } from "@blueprintjs/core";
+import { Icon } from "@appsmith/ads";
 import {
-  CONTEXT_EDIT_NAME,
+  CONTEXT_RENAME,
   CONTEXT_CLONE,
   CONTEXT_SET_AS_HOME_PAGE,
   CONTEXT_DELETE,
   CONFIRM_CONTEXT_DELETE,
   createMessage,
-} from "@appsmith/constants/messages";
+  CONTEXT_PARTIAL_EXPORT,
+  CONTEXT_PARTIAL_IMPORT,
+} from "ee/constants/messages";
+import { getPageById } from "selectors/editorSelectors";
+import { getCurrentApplication } from "ee/selectors/applicationSelectors";
+import type { AppState } from "ee/reducers";
+import ContextMenu from "pages/Editor/Explorer/ContextMenu";
+import type { TreeDropdownOption } from "pages/Editor/Explorer/ContextMenu";
+import { useFeatureFlag } from "utils/hooks/useFeatureFlag";
+import { FEATURE_FLAG } from "ee/entities/FeatureFlag";
+import {
+  getHasCreatePagePermission,
+  getHasDeletePagePermission,
+  getHasManagePagePermission,
+} from "ee/utils/BusinessFeatures/permissionPageHelpers";
+import { openPartialExportModal } from "actions/widgetActions";
+import { openPartialImportModal } from "ee/actions/applicationActions";
 
 const CustomLabel = styled.div`
   display: flex;
@@ -36,8 +47,11 @@ export function PageContextMenu(props: {
   name: string;
   applicationId: string;
   className?: string;
+  isCurrentPage: boolean;
   isDefaultPage: boolean;
   isHidden: boolean;
+  hasExportPermission: boolean;
+  onItemSelected?: () => void;
 }) {
   const dispatch = useDispatch();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -48,7 +62,7 @@ export function PageContextMenu(props: {
    * @return void
    */
   const deletePageCallback = useCallback((): void => {
-    dispatch(deletePage(props.pageId));
+    dispatch(deletePageAction(props.pageId));
     AnalyticsUtil.logEvent("DELETE_PAGE", {
       pageName: props.name,
     });
@@ -78,10 +92,10 @@ export function PageContextMenu(props: {
    *
    * @return void
    */
-  const clonePage = useCallback(() => dispatch(clonePageInit(props.pageId)), [
-    dispatch,
-    props.pageId,
-  ]);
+  const clonePage = useCallback(
+    () => dispatch(clonePageInit(props.pageId)),
+    [dispatch, props.pageId],
+  );
 
   /**
    * sets the page hidden
@@ -89,67 +103,125 @@ export function PageContextMenu(props: {
    * @return void
    */
   const setHiddenField = useCallback(
-    () => dispatch(updatePage(props.pageId, props.name, !props.isHidden)),
+    () =>
+      dispatch(
+        updatePageAction({
+          id: props.pageId,
+          name: props.name,
+          isHidden: !props.isHidden,
+        }),
+      ),
     [dispatch, props.pageId, props.name, props.isHidden],
   );
 
-  const optionTree: TreeDropdownOption[] = [
-    {
+  const showPartialImportExportInMenu = useMemo(
+    () => props.hasExportPermission && props.isCurrentPage,
+    [props.hasExportPermission, props.isCurrentPage],
+  );
+
+  const handlePartialExportClick = () => {
+    if (props.onItemSelected) props.onItemSelected();
+
+    dispatch(openPartialExportModal(true));
+  };
+  const handlePartialImportClick = () => {
+    if (props.onItemSelected) props.onItemSelected();
+
+    dispatch(openPartialImportModal(true));
+  };
+
+  const pagePermissions =
+    useSelector(getPageById(props.pageId))?.userPermissions || [];
+
+  const userAppPermissions = useSelector(
+    (state: AppState) => getCurrentApplication(state)?.userPermissions ?? [],
+  );
+
+  const isFeatureEnabled = useFeatureFlag(FEATURE_FLAG.license_gac_enabled);
+
+  const canCreatePages = getHasCreatePagePermission(
+    isFeatureEnabled,
+    userAppPermissions,
+  );
+
+  const canManagePages = getHasManagePagePermission(
+    isFeatureEnabled,
+    pagePermissions,
+  );
+
+  const canDeletePages = getHasDeletePagePermission(
+    isFeatureEnabled,
+    pagePermissions,
+  );
+
+  const optionsTree = [
+    canManagePages && {
       value: "rename",
       onSelect: editPageName,
-      label: createMessage(CONTEXT_EDIT_NAME),
+      label: createMessage(CONTEXT_RENAME),
     },
-    {
-      value: "clone",
-      onSelect: clonePage,
-      label: createMessage(CONTEXT_CLONE),
-    },
-    {
+    canCreatePages &&
+      canManagePages && {
+        value: "clone",
+        onSelect: clonePage,
+        label: createMessage(CONTEXT_CLONE),
+      },
+    canManagePages && {
       value: "visibility",
       onSelect: setHiddenField,
       // Possibly support ReactNode in TreeOption
-      label: ((
+      label: (
         <CustomLabel>
           {props.isHidden ? "Show" : "Hide"}
-          <Icon icon={props.isHidden ? "eye-open" : "eye-off"} iconSize={14} />
+          <Icon name={props.isHidden ? "eye-on" : "eye-off"} size="md" />
         </CustomLabel>
-      ) as ReactNode) as string,
+      ) as ReactNode as string,
     },
-  ];
-  if (!props.isDefaultPage) {
-    optionTree.push({
-      value: "setdefault",
-      onSelect: setPageAsDefaultCallback,
-      label: createMessage(CONTEXT_SET_AS_HOME_PAGE),
-    });
-  }
-
-  if (!props.isDefaultPage) {
-    optionTree.push({
-      className: "t--apiFormDeleteBtn single-select",
-      confirmDelete: confirmDelete,
-      value: "delete",
-      onSelect: () => {
-        confirmDelete ? deletePageCallback() : setConfirmDelete(true);
+    !props.isDefaultPage &&
+      canManagePages && {
+        value: "setdefault",
+        onSelect: setPageAsDefaultCallback,
+        label: createMessage(CONTEXT_SET_AS_HOME_PAGE),
       },
-      label: confirmDelete
-        ? createMessage(CONFIRM_CONTEXT_DELETE)
-        : createMessage(CONTEXT_DELETE),
-      intent: "danger",
-    });
-  }
-  return (
-    <TreeDropdown
+    props.isDefaultPage &&
+      canManagePages && {
+        className: "!text-[color:var(--appsmith-color-black-500)]",
+        disabled: true,
+        value: "setdefault",
+        label: createMessage(CONTEXT_SET_AS_HOME_PAGE),
+      },
+    showPartialImportExportInMenu && {
+      value: "partial-export",
+      onSelect: handlePartialExportClick,
+      label: createMessage(CONTEXT_PARTIAL_EXPORT),
+    },
+    showPartialImportExportInMenu && {
+      value: "partial-import",
+      onSelect: handlePartialImportClick,
+      label: createMessage(CONTEXT_PARTIAL_IMPORT),
+    },
+    !props.isDefaultPage &&
+      canDeletePages && {
+        className: "t--apiFormDeleteBtn single-select",
+        confirmDelete: confirmDelete,
+        value: "delete",
+        onSelect: () => {
+          confirmDelete ? deletePageCallback() : setConfirmDelete(true);
+        },
+        label: confirmDelete
+          ? createMessage(CONFIRM_CONTEXT_DELETE)
+          : createMessage(CONTEXT_DELETE),
+        intent: "danger",
+      },
+  ].filter(Boolean);
+
+  return optionsTree?.length > 0 ? (
+    <ContextMenu
       className={props.className}
-      defaultText=""
-      modifiers={ContextMenuPopoverModifiers}
-      onSelect={noop}
-      optionTree={optionTree}
-      selectedValue=""
+      optionTree={optionsTree as TreeDropdownOption[]}
       setConfirmDelete={setConfirmDelete}
-      toggle={<ContextMenuTrigger className="t--context-menu" />}
     />
-  );
+  ) : null;
 }
 
 export default PageContextMenu;

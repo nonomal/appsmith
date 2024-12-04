@@ -7,19 +7,26 @@ import Field from "widgets/JSONFormWidget/component/Field";
 import FormContext from "../FormContext";
 import useEvents from "./useBlurAndFocusEvents";
 import useRegisterFieldValidity from "./useRegisterFieldValidity";
-import {
+import type {
   FieldComponentBaseProps,
   BaseFieldComponentProps,
   FieldEventProps,
   ComponentDefaultValuesFnProps,
 } from "../constants";
+import { ActionUpdateDependency } from "../constants";
 import { EventType } from "constants/AppsmithActionConstants/ActionConstants";
-import { dateFormatOptions } from "../widget/propertyConfig/properties/date";
+import { dateFormatOptions } from "WidgetProvider/constants";
 import { ISO_DATE_FORMAT } from "constants/WidgetValidation";
 import { TimePrecision } from "widgets/DatePickerWidget2/constants";
+import { Colors } from "constants/Colors";
+import { BASE_LABEL_TEXT_SIZE } from "../component/FieldLabel";
+import useUnmountFieldValidation from "./useUnmountFieldValidation";
 
 type DateComponentProps = FieldComponentBaseProps &
   FieldEventProps & {
+    accentColor?: string;
+    borderRadius?: string;
+    boxShadow?: string;
     closeOnSelection: boolean;
     convertToISO: boolean;
     dateFormat: string;
@@ -30,6 +37,11 @@ type DateComponentProps = FieldComponentBaseProps &
     shortcuts: boolean;
     timePrecision: TimePrecision;
   };
+
+type DateFieldProps = BaseFieldComponentProps<DateComponentProps>;
+
+const DEFAULT_PRIMARY_COLOR = Colors.GREEN;
+const DEFAULT_BORDER_RADIUS = "0";
 
 const COMPONENT_DEFAULT_VALUES = {
   closeOnSelection: false,
@@ -43,6 +55,7 @@ const COMPONENT_DEFAULT_VALUES = {
   minDate: "1920-12-31T18:30:00.000Z",
   shortcuts: false,
   timePrecision: TimePrecision.MINUTE,
+  labelTextSize: BASE_LABEL_TEXT_SIZE,
 };
 
 const componentDefaultValues = ({
@@ -67,6 +80,7 @@ const componentDefaultValues = ({
     if (sourceDataPath && !skipDefaultValueProcessing) {
       const { prefixTemplate, suffixTemplate } = bindingTemplate;
       const defaultValueString = `moment(${sourceDataPath}, "${dateFormat}").format("${ISO_DATE_FORMAT}")`;
+
       defaultValue = `${prefixTemplate}${defaultValueString}${suffixTemplate}`;
     }
   }
@@ -78,15 +92,14 @@ const componentDefaultValues = ({
   };
 };
 
-type DateFieldProps = BaseFieldComponentProps<DateComponentProps>;
-
 export const isValidType = (value: string) =>
   dateFormatOptions.some(({ value: format }) =>
     moment(value, format, true).isValid(),
   );
 
-const isValid = (schemaItem: DateFieldProps["schemaItem"], value?: string) =>
-  !schemaItem.isRequired || Boolean(value?.trim());
+const isValid = (schemaItem: DateFieldProps["schemaItem"], value?: unknown) =>
+  !schemaItem.isRequired ||
+  (typeof value === "string" && Boolean(value?.trim()));
 
 function DateField({
   fieldClassName,
@@ -121,6 +134,7 @@ function DateField({
     fieldName: name,
     fieldType,
   });
+  useUnmountFieldValidation({ fieldName: name });
 
   const onDateSelected = useCallback(
     (selectedValue: string) => {
@@ -137,6 +151,7 @@ function DateField({
           event: {
             type: EventType.ON_DATE_SELECTED,
           },
+          updateDependencyType: ActionUpdateDependency.FORM_DATA,
         });
       }
     },
@@ -180,6 +195,10 @@ function DateField({
   const fieldComponent = useMemo(() => {
     return (
       <DateComponent
+        accentColor={schemaItem.accentColor || DEFAULT_PRIMARY_COLOR}
+        backgroundColor="white"
+        borderRadius={schemaItem.borderRadius ?? DEFAULT_BORDER_RADIUS}
+        boxShadow={schemaItem.boxShadow ?? "none"}
         closeOnSelection={schemaItem.closeOnSelection}
         compactMode
         dateFormat={schemaItem.dateFormat}
@@ -187,6 +206,7 @@ function DateField({
         inputRef={inputRef}
         isDisabled={schemaItem.isDisabled}
         isLoading={false}
+        isRequired={schemaItem.isRequired}
         labelText=""
         maxDate={schemaItem.maxDate}
         minDate={schemaItem.minDate}
@@ -194,10 +214,13 @@ function DateField({
         selectedDate={valueInISOFormat}
         shortcuts={schemaItem.shortcuts}
         timePrecision={schemaItem.timePrecision}
-        widgetId=""
+        widgetId={fieldClassName}
       />
     );
   }, [
+    schemaItem.accentColor,
+    schemaItem.boxShadow,
+    schemaItem.borderRadius,
     schemaItem.closeOnSelection,
     schemaItem.dateFormat,
     schemaItem.isDisabled,
@@ -207,6 +230,7 @@ function DateField({
     schemaItem.shortcuts,
     schemaItem.timePrecision,
     inputRef,
+    fieldClassName,
   ]);
 
   return (

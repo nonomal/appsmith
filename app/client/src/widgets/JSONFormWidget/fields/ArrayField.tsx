@@ -6,41 +6,56 @@ import React, {
   useState,
 } from "react";
 import styled from "styled-components";
-import { ControllerRenderProps, useFormContext } from "react-hook-form";
+import type { ControllerRenderProps } from "react-hook-form";
+import { useFormContext } from "react-hook-form";
 import { get, set } from "lodash";
 import { Icon } from "@blueprintjs/core";
+import log from "loglevel";
 
 import Accordion from "../component/Accordion";
-import FieldLabel from "../component/FieldLabel";
+import FieldLabel, { BASE_LABEL_TEXT_SIZE } from "../component/FieldLabel";
 import FieldRenderer from "./FieldRenderer";
 import FormContext from "../FormContext";
 import NestedFormWrapper from "../component/NestedFormWrapper";
 import useDeepEffect from "utils/hooks/useDeepEffect";
 import useUpdateAccessor from "./useObserveAccessor";
-import {
-  ARRAY_ITEM_KEY,
+import type {
   BaseFieldComponentProps,
   FieldComponent,
   FieldComponentBaseProps,
   FieldState,
   SchemaItem,
 } from "../constants";
+import { ARRAY_ITEM_KEY } from "../constants";
 import { Colors } from "constants/Colors";
 import { FIELD_MARGIN_BOTTOM } from "../component/styleConstants";
 import { generateReactKey } from "utils/generators";
 import { schemaItemDefaultValue } from "../helper";
-
-import { klona } from "klona/full";
+import { klonaRegularWithTelemetry } from "utils/helpers";
 
 type ArrayComponentProps = FieldComponentBaseProps & {
   backgroundColor?: string;
+  borderColor?: string;
+  borderWidth?: number;
+  borderRadius?: string;
+  boxShadow?: string;
   cellBackgroundColor?: string;
   cellBorderColor?: string;
+  cellBorderWidth?: number;
+  cellBorderRadius?: string;
+  cellBoxShadow?: string;
+  accentColor?: string;
+  // TODO: Fix this the next time the file is edited
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   defaultValue?: any[];
   isCollapsible: boolean;
 };
 
 type ArrayFieldProps = BaseFieldComponentProps<ArrayComponentProps>;
+
+interface StyledButtonProps {
+  color?: string;
+}
 
 const COMPONENT_DEFAULT_VALUES: ArrayComponentProps = {
   backgroundColor: Colors.GREY_1,
@@ -48,6 +63,7 @@ const COMPONENT_DEFAULT_VALUES: ArrayComponentProps = {
   isDisabled: false,
   isRequired: false,
   isVisible: true,
+  labelTextSize: BASE_LABEL_TEXT_SIZE,
   label: "",
 };
 
@@ -63,15 +79,24 @@ const StyledItemWrapper = styled.div`
   flex-direction: column;
 `;
 
-const StyledButton = styled.button`
+const StyledButton = styled.button<StyledButtonProps>`
   align-items: center;
-  color: ${Colors.GREEN};
+  color: ${({ color }) => color || Colors.GREEN};
   display: flex;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   margin-top: 10px;
   width: 80px;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.3;
+
+    & * {
+      pointer-events: none;
+    }
+  }
 
   span.bp3-icon {
     margin-right: 6px;
@@ -88,12 +113,30 @@ const DEFAULT_FIELD_RENDERER_OPTIONS = {
   hideAccordion: true,
 };
 
+/**
+ * TODO(Ashit): The +1 to the ACTION_ICON_SIZE is an eye-balled value to center
+ * align the icon and the text (Add new / Remove). The icon seems to
+ * have an odd height which leads to this inconsistency and needs to be further
+ * investigated
+ */
+
+const StyledIconWrapper = styled.div`
+  display: flex;
+  align-items: center;
+
+  & span {
+    height: ${ACTION_ICON_SIZE + 1}px;
+  }
+`;
+
 const deleteIcon = (
-  <Icon
-    icon="trash"
-    iconSize={ACTION_ICON_SIZE}
-    style={{ color: Colors.CRIMSON }}
-  />
+  <StyledIconWrapper>
+    <Icon
+      icon="trash"
+      iconSize={ACTION_ICON_SIZE}
+      style={{ color: Colors.CRIMSON }}
+    />
+  </StyledIconWrapper>
 );
 
 const getDefaultValue = (
@@ -126,30 +169,48 @@ function ArrayField({
   const removedKeys = useRef<string[]>([]);
   const defaultValue = getDefaultValue(schemaItem, passedDefaultValue);
   const value = watch(name);
-  const valueLength = value?.length || 0;
-  const [cachedDefaultValue, setCachedDefaultValue] = useState<unknown[]>(
-    defaultValue,
-  );
+  /**
+   * parsedArrayValue is a patch that parses a stringified array.
+   * We are doing this because we want to avoid creation of multiple children fields when the ArrayField recieves value as a stringified array.
+   * This scenario happens when evaluations returns the defaultValue as a stringified array earlier in the evaluation cycles.
+   * Please refer to this issue:https://github.com/appsmithorg/appsmith/issues/23825 for more information.
+   */
+  let parsedArrayValue = value;
+
+  try {
+    if (typeof value === "string") {
+      parsedArrayValue = JSON.parse(value);
+    }
+  } catch (e) {
+    log.debug("Unable to parse value", e);
+  }
+  const valueLength = parsedArrayValue?.length || 0;
+  const [cachedDefaultValue, setCachedDefaultValue] =
+    useState<unknown[]>(defaultValue);
 
   useUpdateAccessor({ accessor: schemaItem.accessor });
 
   const { setMetaInternalFieldState } = useContext(FormContext);
 
-  const basePropertyPath = `${propertyPath}.children.${ARRAY_ITEM_KEY}`;
-
   const add = () => {
-    let values = klona(getValues(name));
+    let values = klonaRegularWithTelemetry(getValues(name), "ArrayField.add");
+
     if (values && values.length) {
       values.push({});
     } else {
       values = [{}];
     }
+
     setValue(name, values);
   };
 
   const remove = useCallback(
     (removedKey: string) => {
-      const values = klona(getValues(name));
+      const values = klonaRegularWithTelemetry(
+        getValues(name),
+        "ArrayField.remove",
+      );
+
       if (values === undefined) {
         return;
       }
@@ -165,7 +226,10 @@ function ArrayField({
       // cachedDefaultValue[index] in the FieldRenderer
       if (removedIndex < cachedDefaultValue.length) {
         setCachedDefaultValue((prevDefaultValue) => {
-          const clonedValue = klona(prevDefaultValue);
+          const clonedValue = klonaRegularWithTelemetry(
+            prevDefaultValue,
+            "ArrayField.remove.setCachedDefaultValue",
+          );
 
           clonedValue.splice(removedIndex, 1);
 
@@ -175,15 +239,18 @@ function ArrayField({
 
       // Manually remove from the values and re-insert to maintain the position of the
       // values
-      const newValues = klona(
+      const newValues = klonaRegularWithTelemetry(
+        // TODO: Fix this the next time the file is edited
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         values.filter((_val: any, index: number) => index !== removedIndex),
+        "ArrayField.remove.newValues",
       );
 
       removedKeys.current = [removedKey];
 
       setValue(name, newValues);
     },
-    [keysRef, setValue, getValues],
+    [cachedDefaultValue, keysRef, setValue, getValues],
   );
 
   const itemKeys = useMemo(() => {
@@ -198,6 +265,7 @@ function ArrayField({
       } else {
         const diff = keysRef.current.length - valueLength;
         const newKeys = [...keysRef.current];
+
         newKeys.splice(-1 * diff);
 
         keysRef.current = newKeys;
@@ -205,9 +273,7 @@ function ArrayField({
     } else if (keysRef.current.length < valueLength) {
       const diff = valueLength - keysRef.current.length;
 
-      const newKeys = Array(diff)
-        .fill(0)
-        .map(generateReactKey);
+      const newKeys = Array(diff).fill(0).map(generateReactKey);
 
       keysRef.current = [...keysRef.current, ...newKeys];
     }
@@ -216,8 +282,19 @@ function ArrayField({
   }, [valueLength]);
 
   useDeepEffect(() => {
-    setValue(name, klona(defaultValue));
-    setCachedDefaultValue(klona(defaultValue));
+    setValue(
+      name,
+      klonaRegularWithTelemetry(
+        defaultValue,
+        "ArrayField.useDeepEffect.setValue",
+      ),
+    );
+    setCachedDefaultValue(
+      klonaRegularWithTelemetry(
+        defaultValue,
+        "ArrayField.useDeepEffect.setCachedDefaultValue",
+      ),
+    );
   }, [defaultValue]);
 
   /**
@@ -228,7 +305,11 @@ function ArrayField({
    */
   useDeepEffect(() => {
     setMetaInternalFieldState((prevState) => {
-      const metaInternalFieldState = klona(prevState.metaInternalFieldState);
+      const metaInternalFieldState = klonaRegularWithTelemetry(
+        prevState.metaInternalFieldState,
+        "ArrayField.useDeepEffect.setMetaInternalFieldState",
+      );
+
       const currMetaInternalFieldState: FieldState<{ isValid: true }> = get(
         metaInternalFieldState,
         name,
@@ -237,10 +318,8 @@ function ArrayField({
 
       if (Array.isArray(currMetaInternalFieldState)) {
         if (currMetaInternalFieldState.length > itemKeys.length) {
-          const updatedMetaInternalFieldState = currMetaInternalFieldState.slice(
-            0,
-            itemKeys.length,
-          );
+          const updatedMetaInternalFieldState =
+            currMetaInternalFieldState.slice(0, itemKeys.length);
 
           set(metaInternalFieldState, name, updatedMetaInternalFieldState);
         }
@@ -256,14 +335,18 @@ function ArrayField({
   const fields = useMemo(() => {
     const arrayItemSchema = schemaItem.children[ARRAY_ITEM_KEY];
 
+    const fieldPropertyPath = `${propertyPath}.children.${ARRAY_ITEM_KEY}`;
+
     return itemKeys.map((key, index) => {
       const fieldName = `${name}[${index}]` as ControllerRenderProps["name"];
-      const fieldPropertyPath = `${basePropertyPath}.children.${arrayItemSchema.identifier}`;
 
       return (
         <Accordion
           backgroundColor={schemaItem.cellBackgroundColor}
           borderColor={schemaItem.cellBorderColor}
+          borderRadius={schemaItem.cellBorderRadius}
+          borderWidth={schemaItem.cellBorderWidth}
+          boxShadow={schemaItem.cellBoxShadow}
           className={`t--jsonformfield-${fieldClassName}-item t--item-${index}`}
           isCollapsible={schemaItem.isCollapsible}
           key={key}
@@ -279,7 +362,8 @@ function ArrayField({
             />
             <StyledDeleteButton
               className="t--jsonformfield-array-delete-btn"
-              onClick={() => remove(key)}
+              disabled={schemaItem.isDisabled}
+              onClick={schemaItem.isDisabled ? undefined : () => remove(key)}
               type="button"
             >
               {deleteIcon}
@@ -290,13 +374,13 @@ function ArrayField({
       );
     });
   }, [
-    schemaItem,
-    basePropertyPath,
-    name,
-    remove,
-    itemKeys,
-    fieldClassName,
     cachedDefaultValue,
+    fieldClassName,
+    itemKeys,
+    name,
+    propertyPath,
+    remove,
+    schemaItem,
   ]);
 
   if (!schemaItem.isVisible) {
@@ -306,6 +390,10 @@ function ArrayField({
   return (
     <StyledNestedFormWrapper
       backgroundColor={schemaItem.backgroundColor}
+      borderColor={schemaItem.borderColor}
+      borderRadius={schemaItem.borderRadius}
+      borderWidth={schemaItem.borderWidth}
+      boxShadow={schemaItem.boxShadow}
       className={`t--jsonformfield-${fieldClassName}`}
     >
       <FieldLabel
@@ -318,14 +406,18 @@ function ArrayField({
       {fields}
       <StyledButton
         className="t--jsonformfield-array-add-btn"
-        onClick={add}
+        color={schemaItem.accentColor}
+        disabled={schemaItem.isDisabled}
+        onClick={schemaItem.isDisabled ? undefined : add}
         type="button"
       >
-        <Icon
-          icon="add"
-          iconSize={ACTION_ICON_SIZE}
-          style={{ color: Colors.GREEN }}
-        />
+        <StyledIconWrapper>
+          <Icon
+            icon="add"
+            iconSize={ACTION_ICON_SIZE}
+            style={{ color: schemaItem.accentColor || Colors.GREEN }}
+          />
+        </StyledIconWrapper>
         <span className="t--text">Add New</span>
       </StyledButton>
     </StyledNestedFormWrapper>
@@ -333,6 +425,6 @@ function ArrayField({
 }
 
 const MemoizedArrayField: FieldComponent = React.memo(ArrayField);
-MemoizedArrayField.componentDefaultValues = COMPONENT_DEFAULT_VALUES;
 
+MemoizedArrayField.componentDefaultValues = COMPONENT_DEFAULT_VALUES;
 export default MemoizedArrayField;

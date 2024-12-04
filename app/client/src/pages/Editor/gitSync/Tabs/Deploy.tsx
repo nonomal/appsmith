@@ -1,72 +1,77 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Space, Title } from "../components/StyledComponents";
 import {
-  CHANGES_ONLY_MIGRATION,
-  CHANGES_ONLY_USER,
-  CHANGES_USER_AND_MIGRATION,
+  ARE_YOU_SURE,
   COMMIT_AND_PUSH,
   COMMIT_TO,
   COMMITTING_AND_PUSHING_CHANGES,
   createMessage,
-  DEPLOY_YOUR_APPLICATION,
+  DISCARD_CHANGES,
+  DISCARDING_AND_PULLING_CHANGES,
   FETCH_GIT_STATUS,
   GIT_NO_UPDATED_TOOLTIP,
   GIT_UPSTREAM_CHANGES,
   PULL_CHANGES,
   READ_DOCUMENTATION,
-} from "@appsmith/constants/messages";
-import styled, { useTheme } from "styled-components";
-import TextInput from "components/ads/TextInput";
-import Button, { Size } from "components/ads/Button";
-import { LabelContainer } from "components/ads/Checkbox";
-
+} from "ee/constants/messages";
+import styled from "styled-components";
+import {
+  Button,
+  Callout,
+  Input,
+  ModalBody,
+  ModalFooter,
+  Text,
+  Tooltip,
+} from "@appsmith/ads";
 import {
   getConflictFoundDocUrlDeploy,
   getGitCommitAndPushError,
+  getGitDiscardError,
   getGitStatus,
   getIsCommitSuccessful,
   getIsCommittingInProgress,
+  getIsDiscardInProgress,
   getIsFetchingGitStatus,
   getIsPullingProgress,
   getPullFailed,
   getUpstreamErrorDocUrl,
 } from "selectors/gitSyncSelectors";
 import { useDispatch, useSelector } from "react-redux";
-import { Colors } from "constants/Colors";
-import { getTypographyByKey, Theme } from "constants/DefaultTheme";
 
-import { getCurrentAppGitMetaData } from "selectors/applicationSelectors";
+import {
+  getCurrentAppGitMetaData,
+  getCurrentApplication,
+} from "ee/selectors/applicationSelectors";
 import DeployPreview from "../components/DeployPreview";
 import {
+  clearCommitErrorState,
+  clearCommitSuccessfulState,
+  clearDiscardErrorState,
   commitToRepoInit,
-  fetchGitStatusInit,
+  discardChanges,
   gitPullInit,
 } from "actions/gitSyncActions";
 import StatusLoader from "../components/StatusLoader";
-import { clearCommitSuccessfulState } from "actions/gitSyncActions";
 import Statusbar, {
   StatusbarWrapper,
 } from "pages/Editor/gitSync/components/Statusbar";
-import GitChanged from "../components/GitChanged";
-import Tooltip from "components/ads/Tooltip";
-import Text, { TextType } from "components/ads/Text";
-import InfoWrapper from "../components/InfoWrapper";
-import Link from "../components/Link";
+import GitChangesList from "../components/GitChangesList";
 import ConflictInfo from "../components/ConflictInfo";
-import Icon, { IconSize } from "components/ads/Icon";
 
-import { isMac } from "utils/helpers";
-import AnalyticsUtil from "utils/AnalyticsUtil";
-import {
-  getApplicationLastDeployedAt,
-  getCurrentApplication,
-} from "selectors/editorSelectors";
+import { isEllipsisActive, isMacOrIOS } from "utils/helpers";
+import AnalyticsUtil from "ee/utils/AnalyticsUtil";
+import { getApplicationLastDeployedAt } from "selectors/editorSelectors";
 import GIT_ERROR_CODES from "constants/GitErrorCodes";
-import useAutoGrow from "utils/hooks/useAutoGrow";
+import { Container, Space } from "../components/StyledComponents";
+import DiscardChangesWarning from "../components/DiscardChangesWarning";
+import { changeInfoSinceLastCommit } from "../utils";
+import type { GitStatusData } from "reducers/uiReducers/gitSyncReducer";
+import PushFailedWarning from "../components/PushFailedWarning";
+import DiscardFailedWarning from "../components/DiscardChangesError";
 
 const Section = styled.div`
-  margin-top: ${(props) => props.theme.spaces[11]}px;
-  margin-bottom: ${(props) => props.theme.spaces[11]}px;
+  margin-top: 0;
+  margin-bottom: ${(props) => props.theme.spaces[7]}px;
 `;
 
 const Row = styled.div`
@@ -74,33 +79,7 @@ const Row = styled.div`
   align-items: center;
 `;
 
-const SectionTitle = styled.div`
-  ${(props) => getTypographyByKey(props, "p1")};
-  color: ${Colors.CHARCOAL};
-  display: inline-flex;
-
-  & .branch {
-    color: ${Colors.CRUSTA};
-    width: 240px;
-    text-overflow: ellipsis;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-`;
-
-const Container = styled.div`
-  width: 100%;
-
-  && ${LabelContainer} span {
-    color: ${Colors.CHARCOAL};
-  }
-
-  .bp3-popover-target {
-    width: fit-content;
-  }
-`;
-
-const INITIAL_COMMIT = "Initial Commit";
+const FIRST_COMMIT = "First Commit";
 const NO_CHANGES_TO_COMMIT = "No changes to commit";
 
 function SubmitWrapper(props: {
@@ -108,9 +87,10 @@ function SubmitWrapper(props: {
   onSubmit: () => void;
 }) {
   const onKeyDown = (e: React.KeyboardEvent) => {
-    const triggerSubmit = isMac()
+    const triggerSubmit = isMacOrIOS()
       ? e.metaKey && e.key === "Enter"
       : e.ctrlKey && e.key === "Enter";
+
     if (triggerSubmit) props.onSubmit();
   };
 
@@ -120,43 +100,44 @@ function SubmitWrapper(props: {
 function Deploy() {
   const lastDeployedAt = useSelector(getApplicationLastDeployedAt);
   const isCommittingInProgress = useSelector(getIsCommittingInProgress);
+  const isDiscardInProgress = useSelector(getIsDiscardInProgress) || false;
   const gitMetaData = useSelector(getCurrentAppGitMetaData);
-  const gitStatus = useSelector(getGitStatus);
+  const gitStatus = useSelector(getGitStatus) as GitStatusData;
   const isFetchingGitStatus = useSelector(getIsFetchingGitStatus);
   const isPullingProgress = useSelector(getIsPullingProgress);
   const isCommitAndPushSuccessful = useSelector(getIsCommitSuccessful);
   const hasChangesToCommit = !gitStatus?.isClean;
-  const gitError = useSelector(getGitCommitAndPushError);
+  const commitAndPushError = useSelector(getGitCommitAndPushError);
+  const discardError = useSelector(getGitDiscardError);
   const pullFailed = useSelector(getPullFailed);
   const commitInputRef = useRef<HTMLInputElement>(null);
   const upstreamErrorDocumentUrl = useSelector(getUpstreamErrorDocUrl);
   const [commitMessage, setCommitMessage] = useState(
-    gitMetaData?.remoteUrl && lastDeployedAt ? "" : INITIAL_COMMIT,
+    gitMetaData?.remoteUrl && lastDeployedAt ? "" : FIRST_COMMIT,
   );
+  const [shouldDiscard, setShouldDiscard] = useState(false);
+  const [isDiscarding, setIsDiscarding] = useState(isDiscardInProgress);
+  const [showDiscardWarning, setShowDiscardWarning] = useState(false);
 
   const currentBranch = gitMetaData?.branchName;
   const dispatch = useDispatch();
 
   const currentApplication = useSelector(getCurrentApplication);
-  const isAutoUpdate = currentApplication?.isAutoUpdate || false;
-  const isManualUpdate = currentApplication?.isManualUpdate || true;
-  const changeReason = isAutoUpdate
-    ? isManualUpdate
-      ? CHANGES_USER_AND_MIGRATION
-      : CHANGES_ONLY_MIGRATION
-    : CHANGES_ONLY_USER;
-  const changeReasonText = createMessage(changeReason);
+  const { changeReasonText, isAutoUpdate, isManualUpdate } =
+    changeInfoSinceLastCommit(currentApplication);
 
   const handleCommit = (doPush: boolean) => {
+    setShowDiscardWarning(false);
     AnalyticsUtil.logEvent("GS_COMMIT_AND_PUSH_BUTTON_CLICK", {
       source: "GIT_DEPLOY_MODAL",
       isAutoUpdate,
       isManualUpdate,
     });
+
     if (currentBranch) {
       dispatch(
         commitToRepoInit({
-          commitMessage,
+          commitMessage: commitMessage.trim(),
           doPush,
         }),
       );
@@ -167,6 +148,7 @@ function Deploy() {
     AnalyticsUtil.logEvent("GS_PULL_GIT_CLICK", {
       source: "GIT_DEPLOY_MODAL",
     });
+
     if (currentBranch) {
       dispatch(gitPullInit());
     }
@@ -175,33 +157,46 @@ function Deploy() {
   const commitButtonText = createMessage(COMMIT_AND_PUSH);
 
   useEffect(() => {
-    dispatch(fetchGitStatusInit());
     return () => {
       dispatch(clearCommitSuccessfulState());
     };
   }, []);
-  const commitButtonDisabled = !hasChangesToCommit || !commitMessage;
+
+  const commitButtonDisabled =
+    !hasChangesToCommit || !commitMessage || commitMessage.trim().length < 1;
   const commitButtonLoading = isCommittingInProgress;
-  const commitInputDisabled = !hasChangesToCommit || isCommittingInProgress;
 
-  const commitRequired = gitStatus?.modifiedPages || gitStatus?.modifiedQueries;
-  const isConflicting = !isFetchingGitStatus && pullFailed;
-
+  const commitRequired = !gitStatus?.isClean;
+  const isConflicting = !isFetchingGitStatus && !!pullFailed;
+  const commitInputDisabled =
+    isConflicting ||
+    !hasChangesToCommit ||
+    isCommittingInProgress ||
+    isCommitAndPushSuccessful ||
+    isDiscarding;
   const pullRequired =
-    gitError &&
-    gitError.code === GIT_ERROR_CODES.PUSH_FAILED_REMOTE_COUNTERPART_IS_AHEAD;
+    commitAndPushError?.code ===
+    GIT_ERROR_CODES.PUSH_FAILED_REMOTE_COUNTERPART_IS_AHEAD;
+
   const showCommitButton =
     !isConflicting &&
     !pullRequired &&
     !isFetchingGitStatus &&
-    !isCommittingInProgress;
-  const isProgressing =
-    commitButtonLoading && (commitRequired || showCommitButton);
+    !isCommittingInProgress &&
+    !isDiscarding;
+  const isCommitting =
+    !!commitButtonLoading &&
+    (commitRequired || showCommitButton) &&
+    !isDiscarding;
+  const showDiscardChangesButton =
+    !isFetchingGitStatus &&
+    !isCommittingInProgress &&
+    hasChangesToCommit &&
+    !isDiscarding &&
+    !isCommitting;
   const commitMessageDisplay = hasChangesToCommit
     ? commitMessage
     : NO_CHANGES_TO_COMMIT;
-
-  const theme = useTheme() as Theme;
 
   useEffect(() => {
     if (!commitInputDisabled && commitInputRef.current) {
@@ -211,128 +206,266 @@ function Deploy() {
 
   const gitConflictDocumentUrl = useSelector(getConflictFoundDocUrlDeploy);
 
-  const autogrowHeight = useAutoGrow(commitMessageDisplay, 37);
+  // const autogrowHeight = useAutoGrow(commitMessageDisplay, 37);
+
+  const onDiscardInit = () => {
+    AnalyticsUtil.logEvent("GIT_DISCARD_WARNING", {
+      source: "GIT_DISCARD_BUTTON_PRESS_1",
+    });
+    setShowDiscardWarning(true);
+    setShouldDiscard(true);
+    dispatch(clearDiscardErrorState());
+  };
+  const onDiscardChanges = () => {
+    AnalyticsUtil.logEvent("GIT_DISCARD", {
+      source: "GIT_DISCARD_BUTTON_PRESS_2",
+    });
+    dispatch(discardChanges());
+    setShowDiscardWarning(false);
+    setShouldDiscard(true);
+    setIsDiscarding(true);
+  };
+  const onCloseDiscardWarning = () => {
+    AnalyticsUtil.logEvent("GIT_DISCARD_CANCEL", {
+      source: "GIT_DISCARD_WARNING_BANNER_CLOSE_CLICK",
+    });
+    setShowDiscardWarning(false);
+    setShouldDiscard(false);
+  };
+
+  useEffect(() => {
+    if (discardError) {
+      setIsDiscarding(false);
+      setShouldDiscard(false);
+    }
+  }, [discardError]);
+
+  const scrollWrapperRef = React.createRef<HTMLDivElement>();
+
+  useEffect(() => {
+    if (scrollWrapperRef.current) {
+      setTimeout(() => {
+        const top = scrollWrapperRef.current?.scrollHeight || 0;
+
+        scrollWrapperRef.current?.scrollTo({
+          top: top,
+        });
+      }, 100);
+    }
+  }, [scrollWrapperRef]);
+
+  const showPullButton =
+    !isFetchingGitStatus &&
+    ((pullRequired && !isConflicting) ||
+      (gitStatus?.behindCount > 0 && gitStatus?.isClean));
+
+  function handleCommitAndPushErrorClose() {
+    dispatch(clearCommitErrorState());
+  }
+
+  function handleDiscardErrorClose() {
+    dispatch(clearDiscardErrorState());
+  }
 
   return (
-    <Container data-testid={"t--deploy-tab-container"}>
-      <Title>{createMessage(DEPLOY_YOUR_APPLICATION)}</Title>
-      <Section>
-        <Text
-          data-testid={"t--git-deploy-change-reason-text"}
-          type={TextType.P1}
+    <>
+      <ModalBody>
+        <Container
+          data-testid={"t--deploy-tab-container"}
+          ref={scrollWrapperRef}
+          style={{ minHeight: 360 }}
         >
-          {changeReasonText}
-        </Text>
-        <GitChanged />
-        <Row>
-          <SectionTitle>
-            <span>{createMessage(COMMIT_TO)}</span>
-            <div className="branch">&nbsp;{currentBranch}</div>
-          </SectionTitle>
-        </Row>
-        <Space size={3} />
-        <SubmitWrapper
-          onSubmit={() => {
-            if (!commitButtonDisabled) handleCommit(true);
-          }}
-        >
-          <TextInput
-            $padding="8px 14px"
-            autoFocus
-            className="t--commit-comment-input"
-            disabled={commitInputDisabled}
-            fill
-            height={`${Math.min(autogrowHeight, 80)}px`}
-            onChange={setCommitMessage}
-            placeholder={"Your commit message here"}
-            ref={commitInputRef}
-            style={{ resize: "none" }}
-            trimValue={false}
-            useTextArea
-            value={commitMessageDisplay}
-          />
-        </SubmitWrapper>
-        {isFetchingGitStatus && (
-          <StatusLoader loaderMsg={createMessage(FETCH_GIT_STATUS)} />
-        )}
-        <Space size={11} />
-        {pullRequired && !isConflicting && (
-          <InfoWrapper>
-            <Icon
-              fillColor={Colors.YELLOW_LIGHT}
-              name="info"
-              size={IconSize.XXXL}
-            />
-            <div style={{ display: "block" }}>
-              <Text style={{ marginRight: theme.spaces[2] }} type={TextType.P3}>
-                {createMessage(GIT_UPSTREAM_CHANGES)}
+          <Section>
+            {hasChangesToCommit && (
+              <Text
+                color={"var(--ads-v2-color-fg-emphasis)"}
+                data-testid={"t--git-deploy-change-reason-text"}
+                kind="heading-s"
+              >
+                {changeReasonText}
               </Text>
-              <Link
-                link={upstreamErrorDocumentUrl}
-                onClick={() => {
-                  AnalyticsUtil.logEvent("GS_GIT_DOCUMENTATION_LINK_CLICK", {
-                    source: "UPSTREAM_CHANGES_LINK_ON_GIT_DEPLOY_MODAL",
-                  });
-                  window.open(upstreamErrorDocumentUrl, "_blank");
-                }}
-                text={createMessage(READ_DOCUMENTATION)}
+            )}
+            <GitChangesList />
+            <SubmitWrapper
+              onSubmit={() => {
+                if (!commitButtonDisabled) handleCommit(true);
+              }}
+            >
+              <Input
+                autoFocus
+                className="t--commit-comment-input"
+                isDisabled={commitInputDisabled}
+                label={
+                  <Row>
+                    <Text style={{ minWidth: "fit-content" }}>
+                      {createMessage(COMMIT_TO)}
+                    </Text>
+                    <Tooltip
+                      content={currentBranch}
+                      isDisabled={
+                        !isEllipsisActive(
+                          document.getElementById(
+                            "git-branch-name-commmit-tab",
+                          ),
+                        )
+                      }
+                    >
+                      <Text
+                        className="branch"
+                        color={"var(--ads-v2-color-fg-brand)"}
+                        id="git-branch-name-commmit-tab"
+                        style={{
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        &nbsp;{currentBranch}
+                      </Text>
+                    </Tooltip>
+                  </Row>
+                }
+                onChange={setCommitMessage}
+                placeholder={"Your commit message here"}
+                ref={commitInputRef}
+                renderAs="textarea"
+                size="md"
+                type="text"
+                value={commitMessageDisplay}
               />
-            </div>
-          </InfoWrapper>
-        )}
-        {pullRequired && !isConflicting && (
+            </SubmitWrapper>
+            {isFetchingGitStatus && (
+              <StatusLoader loaderMsg={createMessage(FETCH_GIT_STATUS)} />
+            )}
+            {/* <Space size={11} /> */}
+            {pullRequired && !isConflicting && (
+              <>
+                <Callout
+                  kind="warning"
+                  links={[
+                    {
+                      children: createMessage(READ_DOCUMENTATION),
+                      onClick: () => {
+                        AnalyticsUtil.logEvent(
+                          "GS_GIT_DOCUMENTATION_LINK_CLICK",
+                          {
+                            source: "UPSTREAM_CHANGES_LINK_ON_GIT_DEPLOY_MODAL",
+                          },
+                        );
+                      },
+                      to: upstreamErrorDocumentUrl,
+                      target: "_blank",
+                    },
+                  ]}
+                >
+                  {createMessage(GIT_UPSTREAM_CHANGES)}
+                </Callout>
+                <Space size={3} />
+              </>
+            )}
+            {isConflicting && (
+              <ConflictInfo
+                browserSupportedRemoteUrl={
+                  gitMetaData?.browserSupportedRemoteUrl || ""
+                }
+                learnMoreLink={gitConflictDocumentUrl}
+              />
+            )}
+
+            {commitAndPushError && (
+              <PushFailedWarning
+                closeHandler={handleCommitAndPushErrorClose}
+                error={commitAndPushError}
+              />
+            )}
+            {isCommitting && !isDiscarding && (
+              <StatusbarWrapper>
+                <Statusbar
+                  completed={!commitButtonLoading}
+                  message={createMessage(COMMITTING_AND_PUSHING_CHANGES)}
+                  period={6}
+                />
+              </StatusbarWrapper>
+            )}
+
+            {isDiscarding && !isCommitting && (
+              <StatusbarWrapper>
+                <Statusbar
+                  completed={!isDiscarding}
+                  message={createMessage(DISCARDING_AND_PULLING_CHANGES)}
+                  period={6}
+                />
+              </StatusbarWrapper>
+            )}
+          </Section>
+
+          {discardError && (
+            <DiscardFailedWarning
+              closeHandler={handleDiscardErrorClose}
+              error={discardError}
+            />
+          )}
+
+          {showDiscardWarning && (
+            <DiscardChangesWarning
+              onCloseDiscardChangesWarning={onCloseDiscardWarning}
+            />
+          )}
+
+          {!pullRequired && !isConflicting && (
+            <DeployPreview showSuccess={isCommitAndPushSuccessful} />
+          )}
+        </Container>
+      </ModalBody>
+      <ModalFooter key="footer" style={{ minHeight: 52 }}>
+        {showPullButton && (
           <Button
             className="t--pull-button"
             isLoading={isPullingProgress}
             onClick={handlePull}
-            size={Size.large}
-            tag="button"
-            text={createMessage(PULL_CHANGES)}
-            width="max-content"
-          />
+            size="md"
+          >
+            {createMessage(PULL_CHANGES)}
+          </Button>
         )}
-        {isConflicting && (
-          <ConflictInfo
-            browserSupportedRemoteUrl={
-              gitMetaData?.browserSupportedRemoteUrl || ""
+
+        {showDiscardChangesButton && (
+          <Button
+            className="t--discard-button discard-changes-link"
+            isDisabled={!showDiscardChangesButton}
+            isLoading={
+              isPullingProgress || isFetchingGitStatus || isCommittingInProgress
             }
-            learnMoreLink={gitConflictDocumentUrl}
-          />
+            kind="error"
+            onClick={() =>
+              shouldDiscard ? onDiscardChanges() : onDiscardInit()
+            }
+            size="md"
+          >
+            {showDiscardWarning
+              ? createMessage(ARE_YOU_SURE)
+              : createMessage(DISCARD_CHANGES)}
+          </Button>
         )}
         {showCommitButton && (
           <Tooltip
-            autoFocus={false}
             content={createMessage(GIT_NO_UPDATED_TOOLTIP)}
-            disabled={showCommitButton && !commitButtonLoading}
-            donotUsePortal
-            position="top"
+            isDisabled={showCommitButton && !commitButtonLoading}
+            placement="top"
           >
             <Button
               className="t--commit-button"
-              disabled={commitButtonDisabled}
+              isDisabled={commitButtonDisabled}
               isLoading={commitButtonLoading}
               onClick={() => handleCommit(true)}
-              size={Size.large}
-              tag="button"
-              text={commitButtonText}
-              width="max-content"
-            />
+              size="md"
+            >
+              {commitButtonText}
+            </Button>
           </Tooltip>
         )}
-        {isProgressing && (
-          <StatusbarWrapper>
-            <Statusbar
-              completed={!commitButtonLoading}
-              message={createMessage(COMMITTING_AND_PUSHING_CHANGES)}
-              period={2}
-            />
-          </StatusbarWrapper>
-        )}
-      </Section>
-      {!pullRequired && !isConflicting && (
-        <DeployPreview showSuccess={isCommitAndPushSuccessful} />
-      )}
-    </Container>
+      </ModalFooter>
+    </>
   );
 }
 

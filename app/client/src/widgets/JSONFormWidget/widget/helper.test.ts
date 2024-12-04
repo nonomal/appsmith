@@ -1,9 +1,9 @@
+import type { FieldThemeStylesheet, Schema } from "../constants";
 import {
   ARRAY_ITEM_KEY,
   DataType,
   FieldType,
   ROOT_SCHEMA_KEY,
-  Schema,
 } from "../constants";
 import schemaTestData from "../schemaTestData";
 import {
@@ -375,6 +375,7 @@ describe(".generateFieldState", () => {
     inputAndExpectedOutput.forEach(
       ({ expectedOutput, metaInternalFieldState }) => {
         const result = generateFieldState(schema, metaInternalFieldState);
+
         expect(result).toEqual(expectedOutput);
       },
     );
@@ -383,7 +384,7 @@ describe(".generateFieldState", () => {
 
 describe(".dynamicPropertyPathListFromSchema", () => {
   it("returns valid auto JS enabled propertyPaths", () => {
-    const schema = ({
+    const schema = {
       [ROOT_SCHEMA_KEY]: {
         identifier: ROOT_SCHEMA_KEY,
         fieldType: FieldType.OBJECT,
@@ -451,7 +452,7 @@ describe(".dynamicPropertyPathListFromSchema", () => {
           },
         },
       },
-    } as unknown) as Schema;
+    } as unknown as Schema;
 
     const expectedPathList = [
       `schema.${ROOT_SCHEMA_KEY}.children.dob.defaultValue`,
@@ -540,6 +541,7 @@ describe(".computeSchema", () => {
     const response = computeSchema({
       currSourceData: sourceData,
       widgetName: "JSONForm1",
+      fieldThemeStylesheets: {} as FieldThemeStylesheet,
     });
 
     expect(response.status).toEqual(ComputedSchemaStatus.LIMIT_EXCEEDED);
@@ -554,6 +556,7 @@ describe(".computeSchema", () => {
       const response = computeSchema({
         currSourceData: sourceData,
         widgetName: "JSONForm1",
+        fieldThemeStylesheets: {} as FieldThemeStylesheet,
       });
 
       expect(response.status).toEqual(ComputedSchemaStatus.UNCHANGED);
@@ -583,6 +586,7 @@ describe(".computeSchema", () => {
       currSourceData,
       prevSourceData,
       widgetName: "JSONForm1",
+      fieldThemeStylesheets: {} as FieldThemeStylesheet,
     });
 
     expect(response.status).toEqual(ComputedSchemaStatus.UNCHANGED);
@@ -594,6 +598,7 @@ describe(".computeSchema", () => {
     const response = computeSchema({
       currSourceData: schemaTestData.initialDataset.dataSource,
       widgetName: "JSONForm1",
+      fieldThemeStylesheets: schemaTestData.fieldThemeStylesheets,
     });
 
     const expectedDynamicPropertyPathList = [
@@ -612,6 +617,7 @@ describe(".computeSchema", () => {
     const existingDynamicBindingPropertyPathList = [
       { key: "dummy.path1" },
       { key: "dummy.path2" },
+      { key: "sourceData" },
     ];
 
     const expectedDynamicPropertyPathList = [
@@ -624,6 +630,7 @@ describe(".computeSchema", () => {
       currSourceData: schemaTestData.initialDataset.dataSource,
       currentDynamicPropertyPathList: existingDynamicBindingPropertyPathList,
       widgetName: "JSONForm1",
+      fieldThemeStylesheets: schemaTestData.fieldThemeStylesheets,
     });
 
     expect(response.status).toEqual(ComputedSchemaStatus.UPDATED);
@@ -637,6 +644,7 @@ describe(".computeSchema", () => {
     const existingDynamicBindingPropertyPathList = [
       { key: "dummy.path1" },
       { key: "dummy.path2" },
+      { key: "sourceData" },
     ];
 
     const expectedDynamicPropertyPathList = [
@@ -650,6 +658,7 @@ describe(".computeSchema", () => {
       prevSchema: schemaTestData.initialDataset.schemaOutput,
       currentDynamicPropertyPathList: existingDynamicBindingPropertyPathList,
       widgetName: "JSONForm1",
+      fieldThemeStylesheets: schemaTestData.fieldThemeStylesheets,
     });
 
     expect(response.status).toEqual(ComputedSchemaStatus.UPDATED);

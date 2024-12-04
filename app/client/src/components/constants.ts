@@ -1,5 +1,5 @@
-import { Intent as BlueprintIntent } from "@blueprintjs/core";
-import { IconName } from "@blueprintjs/icons";
+import type { Intent as BlueprintIntent } from "@blueprintjs/core";
+import type { IconName } from "@blueprintjs/icons";
 
 export interface DropdownOption {
   label: string;
@@ -12,6 +12,11 @@ export interface DropdownOption {
   intent?: BlueprintIntent;
 }
 
+export enum SubTextPosition {
+  BOTTOM,
+  LEFT,
+}
+
 export const InputTypes: { [key: string]: string } = {
   TEXT: "TEXT",
   NUMBER: "NUMBER",
@@ -21,15 +26,17 @@ export const InputTypes: { [key: string]: string } = {
   PASSWORD: "PASSWORD",
   CURRENCY: "CURRENCY",
   SEARCH: "SEARCH",
+  MULTI_LINE_TEXT: "MULTI_LINE_TEXT",
 };
 
-export type InputType = typeof InputTypes[keyof typeof InputTypes];
+export type InputType = (typeof InputTypes)[keyof typeof InputTypes];
 
 export enum ButtonBorderRadiusTypes {
   SHARP = "SHARP",
   ROUNDED = "ROUNDED",
   CIRCLE = "CIRCLE",
 }
+
 export type ButtonBorderRadius = keyof typeof ButtonBorderRadiusTypes;
 
 export enum ButtonBoxShadowTypes {
@@ -92,6 +99,7 @@ export enum LabelPosition {
   Auto = "Auto",
   Top = "Top",
   Left = "Left",
+  Right = "Right",
 }
 
 /**

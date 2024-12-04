@@ -1,382 +1,336 @@
-import React, { useState, useRef, RefObject, useCallback } from "react";
-import { connect, useDispatch } from "react-redux";
-import { withRouter, RouteComponentProps } from "react-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { connect, useDispatch, useSelector } from "react-redux";
+import type { RouteComponentProps } from "react-router";
+import { withRouter } from "react-router";
 import styled from "styled-components";
-import { AppState } from "reducers";
-import { JSEditorRouteParams } from "constants/routes";
+import { every, includes } from "lodash";
+import type { AppState } from "ee/reducers";
+import type { JSEditorRouteParams } from "constants/routes";
 import {
   createMessage,
   DEBUGGER_ERRORS,
   DEBUGGER_LOGS,
+  DEBUGGER_RESPONSE,
   EXECUTING_FUNCTION,
-  EMPTY_JS_OBJECT,
-  PARSING_ERROR,
-  EMPTY_RESPONSE_FIRST_HALF,
-  EMPTY_RESPONSE_LAST_HALF,
-} from "@appsmith/constants/messages";
-import { EditorTheme } from "./CodeEditor/EditorConfig";
+  NO_JS_FUNCTION_RETURN_VALUE,
+  UPDATING_JS_COLLECTION,
+} from "ee/constants/messages";
+import type { EditorTheme } from "./CodeEditor/EditorConfig";
 import DebuggerLogs from "./Debugger/DebuggerLogs";
-import ErrorLogs from "./Debugger/Errors";
-import Resizer, { ResizerCSS } from "./Debugger/Resizer";
-import AnalyticsUtil from "utils/AnalyticsUtil";
-import { JSCollection, JSAction } from "entities/JSCollection";
+import type { JSAction } from "entities/JSCollection";
 import ReadOnlyEditor from "components/editorComponents/ReadOnlyEditor";
-import { startExecutingJSFunction } from "actions/jsPaneActions";
-import Text, { TextType } from "components/ads/Text";
-import { Classes } from "components/ads/common";
+import { Flex, Text } from "@appsmith/ads";
 import LoadingOverlayScreen from "components/editorComponents/LoadingOverlayScreen";
-import { sortBy } from "lodash";
-import { ReactComponent as JSFunction } from "assets/icons/menu/js-function.svg";
-import { ReactComponent as RunFunction } from "assets/icons/menu/run.svg";
-import { JSCollectionData } from "reducers/entityReducers/jsActionsReducer";
-import Callout from "components/ads/Callout";
-import { Variant } from "components/ads/common";
-import { EvaluationError } from "utils/DynamicBindingUtils";
-import { Severity } from "entities/AppsmithConsole";
-import { getJSCollectionIdFromURL } from "pages/Editor/Explorer/helpers";
-import { DebugButton } from "./Debugger/DebugCTA";
-import { thinScrollbar } from "constants/DefaultTheme";
-import { setCurrentTab } from "actions/debuggerActions";
-import { DEBUGGER_TAB_KEYS } from "./Debugger/helpers";
+import type { JSCollectionData } from "ee/reducers/entityReducers/jsActionsReducer";
+import type { EvaluationError } from "utils/DynamicBindingUtils";
+import { DEBUGGER_TAB_KEYS } from "./Debugger/constants";
+import type { BottomTab } from "./EntityBottomTabs";
 import EntityBottomTabs from "./EntityBottomTabs";
-import Icon from "components/ads/Icon";
-import { ReactComponent as FunctionSettings } from "assets/icons/menu/settings.svg";
-import JSFunctionSettings from "pages/Editor/JSEditor/JSFunctionSettings";
-import FlagBadge from "components/utils/FlagBadge";
-
-const ResponseContainer = styled.div`
-  ${ResizerCSS}
-  // Initial height of bottom tabs
-  height: ${(props) => props.theme.actionsBottomTabInitialHeight};
-  width: 100%;
-  // Minimum height of bottom tabs as it can be resized
-  min-height: 36px;
-  background-color: ${(props) => props.theme.colors.apiPane.responseBody.bg};
-
-  .react-tabs__tab-panel {
-    overflow: hidden;
-  }
-`;
+import { getIsSavingEntity } from "selectors/editorSelectors";
+import { getJSResponseViewState, JSResponseState } from "./utils";
+import { getFilteredErrors } from "selectors/debuggerSelectors";
+import { NoResponse } from "PluginActionEditor/components/PluginActionResponse/components/NoResponse";
+import {
+  ResponseTabErrorContainer,
+  ResponseTabErrorContent,
+} from "PluginActionEditor/components/PluginActionResponse/components/ApiResponse";
+import LogHelper from "./Debugger/ErrorLogs/components/LogHelper";
+import LOG_TYPE from "entities/AppsmithConsole/logtype";
+import type { Log, SourceEntity } from "entities/AppsmithConsole";
+import { ENTITY_TYPE } from "ee/entities/AppsmithConsole/utils";
+import { getJsPaneDebuggerState } from "selectors/jsPaneSelectors";
+import { setJsPaneDebuggerState } from "actions/jsPaneActions";
+import { getIDEViewMode } from "selectors/ideSelectors";
+import { EditorViewMode } from "ee/entities/IDE/constants";
+import ErrorLogs from "./Debugger/Errors";
+import { isBrowserExecutionAllowed } from "ee/utils/actionExecutionUtils";
+import JSRemoteExecutionView from "ee/components/JSRemoteExecutionView";
+import { IDEBottomView, ViewHideBehaviour } from "IDE";
 
 const ResponseTabWrapper = styled.div`
   display: flex;
-  height: 100%;
   width: 100%;
+  height: 100%;
+
   &.disable * {
     opacity: 0.8;
     pointer-events: none;
   }
+
   .response-run {
     margin: 0 10px;
   }
 `;
 
-const ResponseTabActionsList = styled.ul`
-  height: 100%;
-  width: 20%;
-  list-style: none;
-  padding-left: 0;
-  ${thinScrollbar};
-  scrollbar-width: thin;
-  overflow: auto;
-  padding-bottom: 40px;
-  margin-top: 0;
-`;
-
-const ResponseTabAction = styled.li`
-  padding: 10px 0px 10px 20px;
-  display: flex;
-  align-items: center;
-  &:hover {
-    cursor: pointer;
-    background-color: #f0f0f0;
-  }
-  .function-name {
-    margin-left: 5px;
-    display: inline-block;
-    flex: 1;
-  }
-  .function-actions {
-    margin-left: auto;
-    order: 2;
-    svg {
-      display: inline-block;
-    }
-  }
-  .run-button {
-    margin: 0 15px;
-    margin-left: 10px;
-  }
-  &.active {
-    background-color: #f0f0f0;
-  }
-`;
-
-const TabbedViewWrapper = styled.div`
-  height: 100%;
-
-  &&& {
-    ul.react-tabs__tab-list {
-      padding: 0px ${(props) => props.theme.spaces[12]}px;
-    }
-  }
-`;
-
-const ResponseViewer = styled.div`
-  width: 80%;
-`;
-
-const NoResponseContainer = styled.div`
-  height: 100%;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  &.empty {
-    background-color: #fafafa;
-  }
-  .${Classes.ICON} {
-    margin-right: 0px;
-    svg {
-      width: 150px;
-      height: 150px;
-    }
-  }
-
-  .${Classes.TEXT} {
-    margin-top: ${(props) => props.theme.spaces[9]}px;
-    color: #090707;
-  }
-`;
-const HelpSection = styled.div`
-  padding-bottom: 5px;
-  padding-top: 10px;
-`;
-
-const FailedMessage = styled.div`
-  display: flex;
-  align-items: center;
-  margin-left: 5px;
-`;
-
-const StyledCallout = styled(Callout)`
-  .${Classes.TEXT} {
-    line-height: normal;
-  }
+const NoReturnValueWrapper = styled.div`
+  padding-left: ${(props) => props.theme.spaces[12]}px;
+  padding-top: ${(props) => props.theme.spaces[6]}px;
 `;
 
 interface ReduxStateProps {
-  responses: Record<string, any>;
-  isExecuting: Record<string, boolean>;
+  errorCount: number;
 }
 
 type Props = ReduxStateProps &
   RouteComponentProps<JSEditorRouteParams> & {
+    currentFunction: JSAction | null;
     theme?: EditorTheme;
-    jsObject: JSCollection;
     errors: Array<EvaluationError>;
+    disabled: boolean;
+    isLoading: boolean;
+    onButtonClick: (e: React.MouseEvent<HTMLElement, MouseEvent>) => void;
+    jsCollectionData: JSCollectionData | undefined;
+    debuggerLogsDefaultName?: string;
   };
 
 function JSResponseView(props: Props) {
-  const { errors, isExecuting, jsObject, responses } = props;
-  const panelRef: RefObject<HTMLDivElement> = useRef(null);
+  const {
+    currentFunction,
+    debuggerLogsDefaultName,
+    disabled,
+    errorCount,
+    errors,
+    isLoading,
+    jsCollectionData,
+    onButtonClick,
+  } = props;
+  const [responseStatus, setResponseStatus] = useState<JSResponseState>(
+    JSResponseState.NoResponse,
+  );
+  const jsObject = jsCollectionData?.config;
+  const responses = (jsCollectionData && jsCollectionData.data) || {};
+  const isDirty = (jsCollectionData && jsCollectionData.isDirty) || {};
+  const isExecuting = (jsCollectionData && jsCollectionData.isExecuting) || {};
   const dispatch = useDispatch();
-  const [selectActionId, setSelectActionId] = useState("");
-  const actionList = jsObject?.actions;
-  const sortedActionList = actionList && sortBy(actionList, "name");
   const response =
-    selectActionId && selectActionId in responses
-      ? responses[selectActionId]
+    currentFunction && currentFunction.id && currentFunction.id in responses
+      ? responses[currentFunction.id]
       : "";
-  const isRunning = selectActionId && !!isExecuting[selectActionId];
-  const errorsList = errors.filter((er) => {
-    return er.severity === Severity.ERROR;
-  });
+  // parse error found while trying to execute function
+  const hasExecutionParseErrors = responseStatus === JSResponseState.IsDirty;
+  // error found while trying to parse JS Object
+  const hasJSObjectParseError = errors.length > 0;
+  const isSaving = useSelector(getIsSavingEntity);
 
-  const onDebugClick = useCallback(() => {
-    AnalyticsUtil.logEvent("OPEN_DEBUGGER", {
-      source: "JS_OBJECT",
-    });
-    dispatch(setCurrentTab(DEBUGGER_TAB_KEYS.ERROR_TAB));
-  }, []);
+  useEffect(() => {
+    setResponseStatus(
+      getJSResponseViewState(
+        currentFunction,
+        isDirty,
+        isExecuting,
+        isSaving,
+        responses,
+      ),
+    );
+  }, [responses, isExecuting, currentFunction, isSaving, isDirty]);
 
-  const [openSettings, setOpenSettings] = useState(false);
-  const [selectedFunction, setSelectedFunction] = useState<
-    undefined | JSAction
-  >(undefined);
-  const isSelectedFunctionAsync = (id: string) => {
-    const jsAction = jsObject.actions.find((action) => action.id === id);
-    if (!!jsAction) {
-      return jsAction?.actionConfiguration.isAsync;
-    }
-    return false;
+  const filteredErrors = useSelector(getFilteredErrors);
+  let errorMessage: string | undefined;
+  let errorType = "ValidationError";
+
+  const localExecutionAllowed = useMemo(() => {
+    return isBrowserExecutionAllowed(
+      jsCollectionData?.config,
+      currentFunction || undefined,
+    );
+  }, [jsCollectionData?.config, currentFunction]);
+
+  // action source for analytics.
+  let actionSource: SourceEntity = {
+    type: ENTITY_TYPE.JSACTION,
+    name: "",
+    id: "",
   };
 
-  const tabs = [
+  try {
+    let errorObject: Log | undefined;
+
+    //get JS execution error from redux store.
+    if (
+      jsCollectionData &&
+      jsCollectionData.config &&
+      jsCollectionData.activeJSActionId
+    ) {
+      every(filteredErrors, (error) => {
+        if (
+          includes(
+            error.id,
+            jsCollectionData?.config.id +
+              "-" +
+              jsCollectionData?.activeJSActionId,
+          )
+        ) {
+          errorObject = error;
+
+          return false;
+        }
+
+        return true;
+      });
+    }
+
+    // update error message.
+    if (errorObject) {
+      if (errorObject.source) {
+        // update action source.
+        actionSource = errorObject.source;
+      }
+
+      if (errorObject.messages) {
+        // update error message.
+        errorMessage =
+          errorObject.messages[0].message.name +
+          ": " +
+          errorObject.messages[0].message.message;
+        errorType = errorObject.messages[0].message.name;
+      }
+    }
+  } catch (e) {}
+
+  const ideViewMode = useSelector(getIDEViewMode);
+
+  const tabs: BottomTab[] = [
     {
-      key: "body",
-      title: "Response",
+      key: DEBUGGER_TAB_KEYS.RESPONSE_TAB,
+      title: createMessage(DEBUGGER_RESPONSE),
       panelComponent: (
         <>
-          <HelpSection>
-            {errorsList.length > 0 ? (
-              <StyledCallout
-                fill
-                label={
-                  <FailedMessage>
-                    <DebugButton onClick={onDebugClick} />
-                  </FailedMessage>
-                }
-                text={createMessage(PARSING_ERROR)}
-                variant={Variant.danger}
-              />
-            ) : (
-              ""
-            )}
-          </HelpSection>
-          <ResponseTabWrapper className={errorsList.length ? "disable" : ""}>
-            {sortedActionList && !sortedActionList?.length ? (
-              <NoResponseContainer className="flex items-center">
-                {createMessage(EMPTY_JS_OBJECT)}
-              </NoResponseContainer>
-            ) : (
-              <>
-                <ResponseTabActionsList>
-                  {sortedActionList &&
-                    sortedActionList?.length > 0 &&
-                    sortedActionList.map((action) => {
-                      return (
-                        <ResponseTabAction
-                          className={
-                            action.id === selectActionId ? "active" : ""
-                          }
-                          key={action.id}
-                          onClick={() => {
-                            setSelectActionId(action.id);
-                          }}
-                        >
-                          <JSFunction />{" "}
-                          <div className="function-name">{action.name}</div>
-                          <div className="function-actions">
-                            {action.actionConfiguration.isAsync ? (
-                              <FlagBadge name={"ASYNC"} />
-                            ) : (
-                              ""
-                            )}
-                            {isSelectedFunctionAsync(action.id) ? (
-                              <FunctionSettings
-                                onClick={() => {
-                                  setSelectedFunction(action);
-                                  setOpenSettings(true);
-                                }}
-                              />
-                            ) : (
-                              ""
-                            )}
+          {localExecutionAllowed &&
+            (hasExecutionParseErrors ||
+              (hasJSObjectParseError && errorMessage)) && (
+              <ResponseTabErrorContainer>
+                <ResponseTabErrorContent>
+                  <div className="t--js-response-parse-error-call-out">
+                    {errorMessage}
+                  </div>
 
-                            <RunFunction
-                              className="run-button"
-                              onClick={() => {
-                                runAction(action);
-                              }}
-                            />
-                          </div>
-                        </ResponseTabAction>
-                      );
-                    })}
-                </ResponseTabActionsList>
-                <ResponseViewer>
-                  {isRunning ? (
-                    <LoadingOverlayScreen theme={props.theme}>
-                      {createMessage(EXECUTING_FUNCTION)}
-                    </LoadingOverlayScreen>
-                  ) : !responses.hasOwnProperty(selectActionId) ? (
-                    <NoResponseContainer className="empty">
-                      <Icon name="no-response" />
-                      <Text className="flex items-center" type={TextType.P1}>
-                        {EMPTY_RESPONSE_FIRST_HALF()}
-                        <RunFunction className="response-run" />
-                        {EMPTY_RESPONSE_LAST_HALF()}
-                      </Text>
-                    </NoResponseContainer>
-                  ) : (
-                    <ReadOnlyEditor
-                      folding
-                      height={"100%"}
-                      input={{
-                        value: response,
-                      }}
-                    />
-                  )}
-                </ResponseViewer>
-                {openSettings &&
-                  !!selectedFunction &&
-                  isSelectedFunctionAsync(selectedFunction.id) && (
-                    <JSFunctionSettings
-                      action={selectedFunction}
-                      openSettings={openSettings}
-                      toggleSettings={() => {
-                        setOpenSettings(!openSettings);
-                      }}
-                    />
-                  )}
-              </>
+                  <LogHelper
+                    logType={LOG_TYPE.EVAL_ERROR}
+                    name={errorType}
+                    source={actionSource}
+                  />
+                </ResponseTabErrorContent>
+              </ResponseTabErrorContainer>
             )}
+          <ResponseTabWrapper
+            className={errors.length && localExecutionAllowed ? "disable" : ""}
+          >
+            <Flex px="spaces-7" width="100%">
+              <>
+                {localExecutionAllowed && (
+                  <>
+                    {responseStatus === JSResponseState.NoResponse && (
+                      <NoResponse
+                        isRunDisabled={disabled}
+                        isRunning={isLoading}
+                        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                        // @ts-ignore
+                        onRunClick={onButtonClick}
+                      />
+                    )}
+                    {responseStatus === JSResponseState.IsExecuting && (
+                      <LoadingOverlayScreen theme={props.theme}>
+                        {createMessage(EXECUTING_FUNCTION)}
+                      </LoadingOverlayScreen>
+                    )}
+                    {responseStatus === JSResponseState.NoReturnValue && (
+                      <NoReturnValueWrapper>
+                        <Text kind="body-m">
+                          {createMessage(
+                            NO_JS_FUNCTION_RETURN_VALUE,
+                            currentFunction?.name,
+                          )}
+                        </Text>
+                      </NoReturnValueWrapper>
+                    )}
+                    {responseStatus === JSResponseState.ShowResponse && (
+                      <ReadOnlyEditor
+                        folding
+                        height={"100%"}
+                        input={{
+                          value: response as string,
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+                {!localExecutionAllowed && (
+                  <JSRemoteExecutionView collectionData={jsCollectionData} />
+                )}
+                {responseStatus === JSResponseState.IsUpdating && (
+                  <LoadingOverlayScreen theme={props.theme}>
+                    {createMessage(UPDATING_JS_COLLECTION)}
+                  </LoadingOverlayScreen>
+                )}
+              </>
+            </Flex>
           </ResponseTabWrapper>
         </>
       ),
     },
     {
-      key: DEBUGGER_TAB_KEYS.ERROR_TAB,
-      title: createMessage(DEBUGGER_ERRORS),
-      panelComponent: <ErrorLogs />,
-    },
-    {
       key: DEBUGGER_TAB_KEYS.LOGS_TAB,
       title: createMessage(DEBUGGER_LOGS),
-      panelComponent: <DebuggerLogs searchQuery={jsObject?.name} />,
+      panelComponent: (
+        <DebuggerLogs searchQuery={debuggerLogsDefaultName || jsObject?.name} />
+      ),
     },
   ];
 
-  const runAction = (action: JSAction) => {
-    setSelectActionId(action.id);
-    const collectionId = getJSCollectionIdFromURL();
-    dispatch(
-      startExecutingJSFunction({
-        collectionName: jsObject?.name || "",
-        action: action,
-        collectionId: collectionId || "",
-      }),
-    );
-  };
+  if (ideViewMode === EditorViewMode.FullScreen) {
+    tabs.push({
+      key: DEBUGGER_TAB_KEYS.ERROR_TAB,
+      title: createMessage(DEBUGGER_ERRORS),
+      count: errorCount,
+      panelComponent: <ErrorLogs />,
+    });
+  }
 
+  // get the selected tab from the store.
+  const { open, responseTabHeight, selectedTab } = useSelector(
+    getJsPaneDebuggerState,
+  );
+
+  // set the selected tab in the store.
+  const setSelectedResponseTab = useCallback((selectedTab: string) => {
+    dispatch(setJsPaneDebuggerState({ open: true, selectedTab }));
+  }, []);
+  // set the height of the response pane on resize.
+  const setResponseHeight = useCallback((height: number) => {
+    dispatch(setJsPaneDebuggerState({ responseTabHeight: height }));
+  }, []);
+
+  // close the debugger
+  const onToggle = useCallback(
+    () => dispatch(setJsPaneDebuggerState({ open: !open })),
+    [open],
+  );
+
+  // Do not render if header tab is selected in the bottom bar.
   return (
-    <ResponseContainer ref={panelRef}>
-      <Resizer panelRef={panelRef} />
-      <TabbedViewWrapper>
-        <EntityBottomTabs defaultIndex={0} tabs={tabs} />
-      </TabbedViewWrapper>
-    </ResponseContainer>
+    <IDEBottomView
+      behaviour={ViewHideBehaviour.COLLAPSE}
+      className="t--js-editor-bottom-pane-container"
+      height={responseTabHeight}
+      hidden={!open}
+      onHideClick={onToggle}
+      setHeight={setResponseHeight}
+    >
+      <EntityBottomTabs
+        isCollapsed={!open}
+        onSelect={setSelectedResponseTab}
+        selectedTabKey={selectedTab || ""}
+        tabs={tabs}
+      />
+    </IDEBottomView>
   );
 }
 
-const mapStateToProps = (
-  state: AppState,
-  props: { jsObject: JSCollection },
-) => {
-  const jsActions = state.entities.jsActions;
-  const { jsObject } = props;
-  const seletedJsObject =
-    jsObject &&
-    jsActions.find(
-      (action: JSCollectionData) => action.config.id === jsObject.id,
-    );
-  const responses = (seletedJsObject && seletedJsObject.data) || {};
-  const isExecuting = (seletedJsObject && seletedJsObject.isExecuting) || {};
+const mapStateToProps = (state: AppState) => {
+  const errorCount = state.ui.debugger.context.errorCount;
+
   return {
-    responses: responses,
-    isExecuting: isExecuting,
+    errorCount,
   };
 };
 

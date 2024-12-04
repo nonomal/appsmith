@@ -3,13 +3,12 @@ import ISDCodeDropdown, {
   ISDCodeDropdownOptions,
   getSelectedISDCode,
 } from "./ISDCodeDropdown";
-import BaseInputComponent, {
-  BaseInputComponentProps,
-} from "widgets/BaseInputWidget/component";
-import { CountryCode } from "libphonenumber-js";
+import type { BaseInputComponentProps } from "widgets/BaseInputWidget/component";
+import BaseInputComponent from "widgets/BaseInputWidget/component";
+import type { CountryCode } from "libphonenumber-js";
 import { InputTypes } from "widgets/BaseInputWidget/constants";
 
-class PhoneInputComponent extends React.Component<PhoneInputComponentProps> {
+class PhoneInputComponent extends React.PureComponent<PhoneInputComponentProps> {
   onTextChange = (
     event:
       | React.ChangeEvent<HTMLInputElement>
@@ -20,13 +19,17 @@ class PhoneInputComponent extends React.Component<PhoneInputComponentProps> {
 
   getLeftIcon = () => {
     const selectedISDCode = getSelectedISDCode(this.props.dialCode);
+
     return (
       <ISDCodeDropdown
+        accentColor={this.props.accentColor}
         allowDialCodeChange={this.props.allowDialCodeChange}
+        borderRadius={this.props.borderRadius}
         disabled={!!this.props.disabled}
         onISDCodeChange={this.props.onISDCodeChange}
         options={ISDCodeDropdownOptions}
         selected={selectedISDCode}
+        widgetId={this.props.widgetId}
       />
     );
   };
@@ -50,7 +53,10 @@ class PhoneInputComponent extends React.Component<PhoneInputComponentProps> {
   render() {
     return (
       <BaseInputComponent
+        accentColor={this.props.accentColor}
         autoFocus={this.props.autoFocus}
+        borderRadius={this.props.borderRadius}
+        boxShadow={this.props.boxShadow}
         compactMode={this.props.compactMode}
         defaultValue={this.props.defaultValue}
         disableNewLineOnPressEnterKey={this.props.disableNewLineOnPressEnterKey}
@@ -62,6 +68,7 @@ class PhoneInputComponent extends React.Component<PhoneInputComponentProps> {
         inputHTMLType="TEL"
         inputType={InputTypes.PHONE_NUMBER}
         intent={this.props.intent}
+        isDynamicHeightEnabled={this.props.isDynamicHeightEnabled}
         isInvalid={this.props.isInvalid}
         isLoading={this.props.isLoading}
         label={this.props.label}

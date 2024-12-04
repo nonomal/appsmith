@@ -34,26 +34,36 @@ const renderProgress = (props: ProgressComponentProps) => {
         );
       }
     }
+
     // Pure circular progress
     return <CircularProgress {...props} />;
   }
+
   // Linear progress components
   if (variant === ProgressVariant.DETERMINATE) {
     // With steps
     if (steps > 1) {
       return <LinearProgressWithSteps {...props} />;
     }
+
     // Pure linear progress
     return (
       <DeterminateLinearProgress
-        data-cy={value}
+        borderRadius={props.borderRadius}
+        data-testid={value}
         fillColor={fillColor}
         value={value}
       />
     );
   }
+
   // Indeterminate linear progress component
-  return <IndeterminateLinearProgress fillColor={fillColor} />;
+  return (
+    <IndeterminateLinearProgress
+      borderRadius={props.borderRadius}
+      fillColor={fillColor}
+    />
+  );
 };
 
 // Calculate current step's progress ratio
@@ -63,6 +73,7 @@ const getProgressPosition = (
   currentStep: number,
 ) => {
   const currStepProgress = percentage - stepSize * currentStep;
+
   if (currStepProgress > stepSize) {
     return 100;
   } else if (currStepProgress < 0) {
@@ -122,6 +133,8 @@ const flowAnimation = css`
 const ProgressContainer = styled.div`
   display: flex;
   align-items: center;
+  height: 100%;
+  width: 100%;
 `;
 
 // Determinate Linear progress
@@ -129,16 +142,19 @@ const DeterminateLinearProgress = styled.div<{
   value?: number;
   fillColor: string;
   withSteps?: boolean;
+  borderRadius?: string;
 }>`
   flex: 1;
   height: ${({ withSteps }) =>
     withSteps ? 100 : LINEAR_PROGRESS_HEIGHT_RATIO}%;
   background: #e8e8e8;
   position: relative;
+  border-radius: ${({ borderRadius }) => borderRadius};
+  overflow: hidden;
 
   &:after {
     background: ${({ fillColor }) => fillColor};
-    ${({ value }) => value && `width: ${value}%`};
+    ${({ value }) => value !== undefined && `width: ${Math.max(0, value)}%;`}
     transition: width 0.4s ease;
     position: absolute;
     content: "";
@@ -148,14 +164,19 @@ const DeterminateLinearProgress = styled.div<{
   }
 `;
 
-const IndeterminateLinearProgressContainer = styled.div`
+const IndeterminateLinearProgressContainer = styled.div<{
+  borderRadius: string;
+}>`
   height: ${LINEAR_PROGRESS_HEIGHT_RATIO}%;
   width: 100%;
   background: #e8e8e8;
+  border-radius: ${({ borderRadius }) => borderRadius};
   overflow: hidden;
 `;
 
-const IndeterminateLinearProgressValue = styled.div<{ fillColor: string }>`
+const IndeterminateLinearProgressValue = styled.div<{
+  fillColor: string;
+}>`
   width: 100%;
   height: 100%;
   ${({ fillColor }) => fillColor && `background: ${fillColor}`};
@@ -164,11 +185,17 @@ const IndeterminateLinearProgressValue = styled.div<{ fillColor: string }>`
 `;
 
 // Indeterminate Linear Progress
-function IndeterminateLinearProgress({ fillColor }: { fillColor: string }) {
+function IndeterminateLinearProgress({
+  borderRadius,
+  fillColor,
+}: {
+  fillColor: string;
+  borderRadius: string;
+}) {
   return (
-    <IndeterminateLinearProgressContainer>
+    <IndeterminateLinearProgressContainer borderRadius={borderRadius}>
       <IndeterminateLinearProgressValue
-        data-cy="indeterminate-linear-progress"
+        data-testid="indeterminate-linear-progress"
         fillColor={fillColor}
       />
     </IndeterminateLinearProgressContainer>
@@ -206,10 +233,12 @@ function LinearProgressWithSteps(props: ProgressComponentProps) {
     <StepWrapper>
       {[...Array(Number(steps))].map((_, index) => {
         const width = getProgressPosition(Number(value), stepSize, index);
+
         return (
-          <StepContainer data-cy="step" key={index}>
+          <StepContainer data-testid="step" key={index}>
             <DeterminateLinearProgress
-              data-cy={width}
+              borderRadius={props.borderRadius}
+              data-testid={width}
               fillColor={props.fillColor}
               value={width}
               withSteps
@@ -306,7 +335,7 @@ function Separator(props: { turns: number }) {
 
   return (
     <SeparatorContainer turns={turns}>
-      <SeparatorOverlay data-cy="separator" />
+      <SeparatorOverlay data-testid="separator" />
     </SeparatorContainer>
   );
 }
@@ -314,6 +343,7 @@ function Separator(props: { turns: number }) {
 function RadialSeparators(props: { steps: number }) {
   const { steps } = props;
   const turns = 1 / steps;
+
   return (
     <>
       {_.range(steps).map((index) => (
@@ -322,6 +352,7 @@ function RadialSeparators(props: { steps: number }) {
     </>
   );
 }
+
 // Pure circular progress (indeterminate/determinate)
 function CircularProgress(props: ProgressComponentProps) {
   const {
@@ -365,12 +396,13 @@ function CircularProgress(props: ProgressComponentProps) {
 
   return (
     <SvgContainer
-      data-cy="circular"
+      data-testid="circular"
       variant={variant}
       viewBox={
         variant === ProgressVariant.INDETERMINATE
-          ? `${INDETERMINATE_SIZE / 2} ${INDETERMINATE_SIZE /
-              2} ${INDETERMINATE_SIZE} ${INDETERMINATE_SIZE}`
+          ? `${INDETERMINATE_SIZE / 2} ${
+              INDETERMINATE_SIZE / 2
+            } ${INDETERMINATE_SIZE} ${INDETERMINATE_SIZE}`
           : `0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`
       }
     >
@@ -414,7 +446,7 @@ function CircularProgress(props: ProgressComponentProps) {
 
           {showResult && !isNaN(value) && (
             <Label
-              data-cy="circular-label"
+              data-testid="circular-label"
               x={VIEWBOX_CENTER_X}
               y={VIEWBOX_CENTER_Y}
             >
@@ -450,6 +482,7 @@ function CircularProgressWithSteps(
 // Main component
 function ProgressComponent(props: ProgressComponentProps) {
   const { showResult, type, variant } = props;
+
   return (
     <ProgressContainer>
       {renderProgress(props)}
@@ -469,6 +502,7 @@ export interface ProgressComponentProps {
   counterClockwise: boolean;
   fillColor: string;
   isScaleY: boolean;
+  borderRadius: string;
 }
 
 export default ProgressComponent;

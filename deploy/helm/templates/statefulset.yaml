@@ -21,6 +21,9 @@ spec:
       {{- end }}
       labels:
         {{- include "appsmith.selectorLabels" . | nindent 8 }}
+        {{- if .Values.podLabels }}
+        {{- toYaml .Values.podLabels | nindent 8 }}
+        {{- end }}
     spec:
       {{- if .Values.schedulerName }}
       schedulerName: {{ .Values.schedulerName | quote }}
@@ -40,6 +43,25 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+      {{- if .Values.redis.enabled }}
+      - name: redis-init-container
+      {{- if ((.Values.initContainer.redis).image) }}
+        image: {{ .Values.initContainer.redis.image }}
+      {{- else }}
+        image: "docker.io/bitnami/redis:7.0.13-debian-11-r10"
+      {{- end }}
+        command: ['sh', '-c', "until redis-cli -h {{.Release.Name}}-redis-master.{{.Release.Namespace}}.svc.cluster.local ping ; do echo waiting for redis; sleep 2; done"]
+      {{- end }}
+      {{- if .Values.mongodb.enabled }}
+      - name: mongo-init-container
+      {{- if ((.Values.initContainer.mongodb).image) }}
+        image: {{ .Values.initContainer.mongodb.image }}
+      {{- else }}
+        image:  "docker.io/bitnami/mongodb:5.0.21-debian-11-r5"
+      {{- end }}
+        command: ['sh', '-c', "until mongo --host appsmith-mongodb.{{.Release.Namespace}}.svc.cluster.local --eval 'db.runCommand({ping:1})' ; do echo waiting for mongo; sleep 2; done"]
+      {{- end }}
       containers:
         - name: {{ .Values.containerName }}
           securityContext:
@@ -48,30 +70,54 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.HTTPContainerPort | default 80 }}
               protocol: TCP
             - name: https
               containerPort: 443
               protocol: TCP
-            - name: supervisord
-              containerPort: 9001
-              protocol: TCP
+          {{- $probes := .Values.probes | default dict }}
+          startupProbe:
+            # The `livenessProbe` and `readinessProbe` will be disabled until the `startupProbe` is successful.
+            httpGet:
+              port: http
+              path: {{ dig "startupProbe" "api" "/api/v1/health" $probes }}
+            failureThreshold: {{ dig "startupProbe" "failureThreshold" 3 $probes }}
+            periodSeconds: {{ dig "startupProbe" "periodSeconds" 60 $probes }}
           livenessProbe:
             httpGet:
-              path: /
               port: http
+              path: {{ dig "livenessProbe" "api" "/api/v1/health" $probes }}
+            failureThreshold: {{ dig "livenessProbe" "failureThreshold" 3 $probes }}
+            periodSeconds: {{ dig "livenessProbe" "periodSeconds" 60 $probes }}
           readinessProbe:
             httpGet:
-              path: /
               port: http
+              path: {{ dig "readinessProbe" "api" "/api/v1/health" $probes }}
+            failureThreshold: {{ dig "readinessProbe" "failureThreshold" 3 $probes }}
+            periodSeconds: {{ dig "readinessProbe" "periodSeconds" 60 $probes }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /appsmith-stacks
+          env:
+          {{- if .Values.HTTPContainerPort }}
+            - name: PORT
+              value: "{{ .Values.HTTPContainerPort }}"
+          {{- end }}
+            - name: APPSMITH_ENABLE_EMBEDDED_DB
+              value: "0"
           envFrom:
             - configMapRef:
                 name: {{ include "appsmith.fullname" . }}
+            {{- if .Values.secretName }}
+            - secretRef:
+                name: {{ .Values.secretName }}
+            {{- end }}
+      {{- if .Values.image.pullSecrets}}
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecrets }}
+      {{- end }}
       volumes:
   {{- if not .Values.persistence.enabled }}
       - name: data

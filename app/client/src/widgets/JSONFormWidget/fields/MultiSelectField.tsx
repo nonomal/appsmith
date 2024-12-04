@@ -1,9 +1,6 @@
 import React, { useCallback, useContext, useMemo, useRef } from "react";
 import styled from "styled-components";
-import {
-  DefaultValueType,
-  LabelValueType,
-} from "rc-select/lib/interface/generator";
+import type { LabelInValueType, DraftValueType } from "rc-select/lib/Select";
 import { useController } from "react-hook-form";
 import { isNil } from "lodash";
 
@@ -14,18 +11,24 @@ import useEvents from "./useBlurAndFocusEvents";
 import useRegisterFieldValidity from "./useRegisterFieldValidity";
 import useUpdateInternalMetaState from "./useUpdateInternalMetaState";
 import { Layers } from "constants/Layers";
-import {
+import type {
   BaseFieldComponentProps,
   FieldComponentBaseProps,
   FieldEventProps,
 } from "../constants";
-import { DropdownOption } from "widgets/MultiSelectTreeWidget/widget";
+import { ActionUpdateDependency } from "../constants";
+import type { DropdownOption } from "widgets/MultiSelectTreeWidget/widget";
 import { EventType } from "constants/AppsmithActionConstants/ActionConstants";
 import { isPrimitive, validateOptions } from "../helper";
+import { Colors } from "constants/Colors";
+import { BASE_LABEL_TEXT_SIZE } from "../component/FieldLabel";
+import useUnmountFieldValidation from "./useUnmountFieldValidation";
 
 type MultiSelectComponentProps = FieldComponentBaseProps &
   FieldEventProps & {
+    boxShadow?: string;
     allowSelectAll?: boolean;
+    borderRadius?: string;
     defaultValue?: string[];
     isFilterable: boolean;
     onFilterChange?: string;
@@ -33,12 +36,15 @@ type MultiSelectComponentProps = FieldComponentBaseProps &
     onOptionChange?: string;
     options: DropdownOption[];
     placeholderText?: string;
+    accentColor?: string;
     serverSideFiltering: boolean;
   };
 
-export type MultiSelectFieldProps = BaseFieldComponentProps<
-  MultiSelectComponentProps
->;
+export type MultiSelectFieldProps =
+  BaseFieldComponentProps<MultiSelectComponentProps>;
+
+const DEFAULT_ACCENT_COLOR = Colors.GREEN;
+const DEFAULT_BORDER_RADIUS = "0";
 
 const COMPONENT_DEFAULT_VALUES: MultiSelectComponentProps = {
   isDisabled: false,
@@ -46,6 +52,7 @@ const COMPONENT_DEFAULT_VALUES: MultiSelectComponentProps = {
   isRequired: false,
   isVisible: true,
   label: "",
+  labelTextSize: BASE_LABEL_TEXT_SIZE,
   serverSideFiltering: false,
   options: [
     { label: "Blue", value: "BLUE" },
@@ -68,8 +75,8 @@ const DEFAULT_DROPDOWN_STYLES = {
 };
 
 const fieldValuesToComponentValues = (
-  values: LabelValueType["value"][],
-  options: LabelValueType[] = [],
+  values: LabelInValueType["value"][],
+  options: LabelInValueType[] = [],
 ) => {
   return values.map((value) => {
     const option = options.find((option) => option.value === value);
@@ -78,8 +85,9 @@ const fieldValuesToComponentValues = (
   });
 };
 
-const componentValuesToFieldValues = (componentValues: LabelValueType[] = []) =>
-  componentValues.map(({ value }) => value);
+const componentValuesToFieldValues = (
+  componentValues: LabelInValueType[] = [],
+) => componentValues.map(({ value }) => value);
 
 function MultiSelectField({
   fieldClassName,
@@ -93,6 +101,9 @@ function MultiSelectField({
     onBlur: onBlurDynamicString,
     onFocus: onFocusDynamicString,
   } = schemaItem;
+  // When the options value is invalid after validation, the string value entered
+  // in the property pane is passed down as options here.
+  const options = Array.isArray(schemaItem.options) ? schemaItem.options : [];
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { executeAction } = useContext(FormContext);
 
@@ -103,7 +114,7 @@ function MultiSelectField({
     name,
   });
 
-  const inputValue: LabelValueType["value"][] =
+  const inputValue: LabelInValueType["value"][] =
     (Array.isArray(value) && value) || [];
 
   const { onBlurHandler, onFocusHandler } = useEvents<HTMLInputElement>({
@@ -119,13 +130,14 @@ function MultiSelectField({
     fieldName: name,
     fieldType,
   });
+  useUnmountFieldValidation({ fieldName: name });
 
   const [updateFilterText] = useUpdateInternalMetaState({
     propertyName: `${name}.filterText`,
   });
 
   const fieldDefaultValue = useMemo(() => {
-    const values: LabelValueType["value"][] | LabelValueType[] = (() => {
+    const values: LabelInValueType["value"][] | LabelInValueType[] = (() => {
       if (!isNil(passedDefaultValue) && validateOptions(passedDefaultValue)) {
         return passedDefaultValue;
       }
@@ -141,16 +153,13 @@ function MultiSelectField({
     })();
 
     if (values.length && isPrimitive(values[0])) {
-      return values as LabelValueType["value"][];
+      return values as LabelInValueType["value"][];
     } else {
-      return componentValuesToFieldValues(values as LabelValueType[]);
+      return componentValuesToFieldValues(values as LabelInValueType[]);
     }
   }, [schemaItem.defaultValue, passedDefaultValue]);
 
-  const componentValues = fieldValuesToComponentValues(
-    inputValue,
-    schemaItem.options,
-  );
+  const componentValues = fieldValuesToComponentValues(inputValue, options);
 
   const onFilterChange = useCallback(
     (value: string) => {
@@ -170,8 +179,8 @@ function MultiSelectField({
   );
 
   const onOptionChange = useCallback(
-    (values: DefaultValueType) => {
-      onChange(componentValuesToFieldValues(values as LabelValueType[]));
+    (values: DraftValueType) => {
+      onChange(componentValuesToFieldValues(values as LabelInValueType[]));
 
       if (schemaItem.onOptionChange && executeAction) {
         executeAction({
@@ -180,6 +189,7 @@ function MultiSelectField({
           event: {
             type: EventType.ON_OPTION_CHANGE,
           },
+          updateDependencyType: ActionUpdateDependency.FORM_DATA,
         });
       }
     },
@@ -191,7 +201,10 @@ function MultiSelectField({
     return (
       <StyledMultiSelectWrapper ref={wrapperRef}>
         <MultiSelect
+          accentColor={schemaItem.accentColor || DEFAULT_ACCENT_COLOR}
           allowSelectAll={schemaItem.allowSelectAll}
+          borderRadius={schemaItem.borderRadius || DEFAULT_BORDER_RADIUS}
+          boxShadow={schemaItem.boxShadow}
           compactMode={false}
           disabled={schemaItem.isDisabled}
           dropDownWidth={dropdownWidth || 100}
@@ -204,7 +217,7 @@ function MultiSelectField({
           onChange={onOptionChange}
           onFilterChange={onFilterChange}
           onFocus={onFocusHandler}
-          options={schemaItem.options || []}
+          options={options}
           placeholder={schemaItem.placeholderText || ""}
           serverSideFiltering={schemaItem.serverSideFiltering}
           value={componentValues}
@@ -221,6 +234,9 @@ function MultiSelectField({
     onFilterChange,
     onFocusHandler,
     onOptionChange,
+    schemaItem.accentColor,
+    schemaItem.boxShadow,
+    schemaItem.borderRadius,
     schemaItem.allowSelectAll,
     schemaItem.isDisabled,
     schemaItem.isFilterable,

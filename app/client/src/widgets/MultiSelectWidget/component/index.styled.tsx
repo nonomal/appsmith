@@ -1,10 +1,9 @@
 import React from "react";
 import { Checkbox, Classes } from "@blueprintjs/core";
-import styled, { keyframes } from "styled-components";
+import styled, { keyframes, createGlobalStyle } from "styled-components";
 import { Colors } from "constants/Colors";
-import { createGlobalStyle } from "constants/DefaultTheme";
-import { LabelPosition } from "components/constants";
-import { labelLayoutStyles } from "components/ads/LabelWithTooltip";
+import type { LabelPosition } from "components/constants";
+import { labelLayoutStyles } from "@design-system/widgets-old";
 
 const rcSelectDropdownSlideUpIn = keyframes`
 	0% {
@@ -303,8 +302,7 @@ export const MultiSelectContainer = styled.div<{
       box-shadow: none;
       border-radius: 0px;
       width: 100%;
-      transition: border-color 0.15s ease-in-out 0s,
-        box-shadow 0.15s ease-in-out 0s;
+      transition: none;
       background-color: white;
       .rc-select-selection-item {
         background: none;
@@ -415,8 +413,7 @@ export const MultiSelectContainer = styled.div<{
       border-radius: 0px;
       height: inherit;
       width: 100%;
-      transition: border-color 0.15s ease-in-out 0s,
-        box-shadow 0.15s ease-in-out 0s;
+      transition: none;
       border: 1.2px solid
         ${(props) => (props.isValid ? Colors.GREY_3 : Colors.DANGER_SOLID)};
       &:hover {
